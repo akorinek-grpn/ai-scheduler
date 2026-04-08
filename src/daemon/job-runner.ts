@@ -33,16 +33,58 @@ function generateRunId(): string {
   return `${timestamp}-${hash}`;
 }
 
+function formatToolInput(name: string, input: Record<string, unknown>): string {
+  switch (name) {
+    case "Bash":
+      return input.command ? `$ ${input.command}` : "";
+    case "Read":
+      return input.file_path ? `Reading ${input.file_path}` : "";
+    case "Write":
+      return input.file_path ? `Writing ${input.file_path}` : "";
+    case "Edit":
+      return input.file_path ? `Editing ${input.file_path}` : "";
+    case "Glob":
+      return input.pattern ? `Glob: ${input.pattern}` : "";
+    case "Grep":
+      return input.pattern ? `Grep: ${input.pattern}` : "";
+    case "Skill":
+      return input.skill ? `Skill: ${input.skill}` : "";
+    case "Agent":
+      return input.description ? `Agent: ${input.description}` : "";
+    default:
+      return "";
+  }
+}
+
+function truncate(text: string, maxLines: number): string {
+  const lines = text.split("\n");
+  if (lines.length <= maxLines) return text;
+  return lines.slice(0, maxLines).join("\n") + `\n... (${lines.length - maxLines} more lines)`;
+}
+
 function extractTextFromStreamJson(line: string): string | null {
   try {
     const event = JSON.parse(line);
 
-    // Assistant message text content
+    // Assistant message — extract text AND tool calls
     if (event.type === "assistant" && event.message?.content) {
-      const texts = event.message.content
-        .filter((b: { type: string }) => b.type === "text")
-        .map((b: { text: string }) => b.text);
-      if (texts.length > 0) return texts.join("");
+      const parts: string[] = [];
+
+      for (const block of event.message.content) {
+        if (block.type === "text" && block.text?.trim()) {
+          parts.push(block.text);
+        }
+        if (block.type === "tool_use") {
+          const detail = formatToolInput(block.name, block.input ?? {});
+          if (detail) {
+            parts.push(`\n> [${block.name}] ${detail}\n`);
+          } else {
+            parts.push(`\n> [${block.name}]\n`);
+          }
+        }
+      }
+
+      if (parts.length > 0) return parts.join("");
     }
 
     // Content block delta (streaming partial text)
@@ -50,28 +92,25 @@ function extractTextFromStreamJson(line: string): string | null {
       return event.delta.text;
     }
 
-    // Result message at the end
-    if (event.type === "result" && event.result?.trim()) {
-      return event.result;
-    }
-
-    // Tool use — log what tool is being called
-    if (event.type === "assistant" && event.message?.content) {
-      for (const block of event.message.content) {
-        if (block.type === "tool_use") {
-          return `[tool: ${block.name}]\n`;
-        }
+    // Tool result — show output
+    if (event.type === "tool_result") {
+      let text = "";
+      if (typeof event.content === "string") {
+        text = event.content;
+      } else if (Array.isArray(event.content)) {
+        text = event.content
+          .filter((b: { type: string }) => b.type === "text")
+          .map((b: { text: string }) => b.text)
+          .join("");
+      }
+      if (text.trim()) {
+        return truncate(text, 50) + "\n";
       }
     }
 
-    // Tool result — log output
-    if (event.type === "tool_result" && event.content) {
-      const text = typeof event.content === "string"
-        ? event.content
-        : Array.isArray(event.content)
-          ? event.content.filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("")
-          : "";
-      if (text) return `${text}\n`;
+    // Final result
+    if (event.type === "result" && event.result?.trim()) {
+      return event.result;
     }
   } catch {
     // Not valid JSON — could be partial line, ignore
