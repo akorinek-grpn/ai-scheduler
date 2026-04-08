@@ -4,7 +4,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 SKILL_SOURCE="$PROJECT_ROOT/skill/ai-scheduler.md"
-SKILL_TARGET="$HOME/.claude/skills/ai-scheduler.md"
+SKILL_DIR="$HOME/.claude/skills/ai-scheduler"
+SKILL_TARGET="$SKILL_DIR/SKILL.md"
 
 echo "AI Scheduler Setup"
 echo "=================="
@@ -22,7 +23,10 @@ mkdir -p "$PROJECT_ROOT/data/runs"
 
 # 3. Install skill as symlink (stays in sync with repo)
 echo "Installing Claude Code skill..."
-mkdir -p "$HOME/.claude/skills"
+mkdir -p "$SKILL_DIR"
+
+# Clean up old formats
+rm -f "$HOME/.claude/skills/ai-scheduler.md" 2>/dev/null
 
 if [ -L "$SKILL_TARGET" ]; then
   rm "$SKILL_TARGET"
