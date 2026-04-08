@@ -5,8 +5,8 @@ A local tool for scheduling and monitoring Claude CLI runs across multiple proje
 ## Quick Start
 
 ```bash
-# Install dependencies
-npm install
+# Install dependencies + Claude Code skill
+./scripts/setup.sh
 
 # Start the scheduler daemon (runs in background)
 ./scripts/start-daemon.sh
@@ -177,11 +177,20 @@ Old runs are automatically pruned based on `retain_runs` in the config.
 
 ## Installing the Skill
 
-The skill source is at `skill/ai-scheduler.md`. To install or reinstall:
+The setup script handles this automatically:
 
+```bash
+./scripts/setup.sh
+```
+
+This installs the skill to `~/.claude/skills/ai-scheduler.md` with absolute paths to your project root baked in. Re-run it if you move the project directory.
+
+To reinstall manually:
 ```bash
 cp skill/ai-scheduler.md ~/.claude/skills/ai-scheduler.md
 ```
+
+**Note:** Skills are loaded when a Claude Code session starts. After installing, start a new session to use `/ai-scheduler`.
 
 ## Troubleshooting
 

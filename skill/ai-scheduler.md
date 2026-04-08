@@ -5,8 +5,10 @@ description: Manage AI Scheduler — add, remove, enable/disable scheduled Claud
 
 You are managing the AI Scheduler, a tool that runs Claude on a cron schedule across multiple project directories.
 
-**Config file location:** Find `scheduler.yaml` by searching upward from the current directory, or check common locations:
-- `/Users/akorinek/Programming/ai-scheduler/scheduler.yaml`
+**Config file location:** Look for `scheduler.yaml` by checking these in order:
+1. The `AI_SCHEDULER_ROOT` environment variable (if set)
+2. Search upward from the current directory for a `scheduler.yaml` file
+3. `~/Programming/ai-scheduler/scheduler.yaml`
 
 **Project root:** The directory containing `scheduler.yaml`.
 
@@ -23,7 +25,7 @@ Required info (ask if not provided):
 - **directory**: absolute path to the working directory
 - **prompt**: the instruction for Claude
 
-Optional: `model`, `timeout`, `tags`, `enabled`
+Optional: `model`, `timeout`, `tags`, `enabled`, `skip_permissions`
 
 ### List jobs
 Read `scheduler.yaml` and display all jobs in a readable format.
@@ -42,12 +44,12 @@ Check if the daemon is running by reading `data/daemon.json` in the project root
 
 ### Start daemon
 ```bash
-/Users/akorinek/Programming/ai-scheduler/scripts/start-daemon.sh
+<project-root>/scripts/start-daemon.sh
 ```
 
 ### Stop daemon
 ```bash
-/Users/akorinek/Programming/ai-scheduler/scripts/stop-daemon.sh
+<project-root>/scripts/stop-daemon.sh
 ```
 
 ### Open UI
