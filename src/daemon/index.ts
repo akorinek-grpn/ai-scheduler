@@ -3,8 +3,8 @@ import path from "path";
 import { loadConfig } from "./config";
 import { CronEngine } from "./cron-engine";
 import { createApp } from "./api";
-import { getDaemonJsonPath } from "@shared/paths";
-import type { DaemonHealth } from "@shared/types";
+import { getDaemonJsonPath, getRunsDir, getStatusPath } from "@shared/paths";
+import type { DaemonHealth, RunStatusFile } from "@shared/types";
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
 const CONFIG_PATH = path.join(PROJECT_ROOT, "scheduler.yaml");
@@ -58,8 +58,46 @@ function watchConfig(engine: CronEngine): void {
   });
 }
 
+function cleanupOrphanedRuns(projectRoot: string): void {
+  const runsDir = getRunsDir(projectRoot);
+  if (!fs.existsSync(runsDir)) return;
+
+  let cleaned = 0;
+  for (const jobId of fs.readdirSync(runsDir)) {
+    const jobDir = path.join(runsDir, jobId);
+    if (!fs.statSync(jobDir).isDirectory()) continue;
+
+    for (const runId of fs.readdirSync(jobDir)) {
+      if (runId === "latest") continue;
+      const statusPath = getStatusPath(projectRoot, jobId, runId);
+      if (!fs.existsSync(statusPath)) continue;
+
+      try {
+        const status: RunStatusFile = JSON.parse(fs.readFileSync(statusPath, "utf-8"));
+        if (status.status === "running") {
+          const updated: RunStatusFile = {
+            ...status,
+            status: "failed",
+            finishedAt: new Date().toISOString(),
+          };
+          fs.writeFileSync(statusPath, JSON.stringify(updated, null, 2));
+          cleaned++;
+        }
+      } catch {
+        // skip corrupt status files
+      }
+    }
+  }
+
+  if (cleaned > 0) {
+    console.log(`[daemon] Cleaned up ${cleaned} orphaned run(s) from previous session`);
+  }
+}
+
 async function main(): Promise<void> {
   console.log(`[daemon] Starting AI Scheduler daemon (pid: ${process.pid})`);
+
+  cleanupOrphanedRuns(PROJECT_ROOT);
 
   const configResult = loadConfig(CONFIG_PATH);
   if (!configResult.success) {

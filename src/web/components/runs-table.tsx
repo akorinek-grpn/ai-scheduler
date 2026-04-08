@@ -11,7 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import type { RunResponse } from "@/lib/api-client";
+import type { RunResponse, RunEvaluation } from "@/lib/api-client";
 
 interface RunsTableProps {
   runs: RunResponse[];
@@ -37,6 +37,33 @@ function StatusBadge({ status }: { status: RunResponse["status"] }): React.React
       {status === "timeout" && <span className="mr-1">⏱</span>}
       {v.label}
     </Badge>
+  );
+}
+
+function EvalBadge({ evaluation }: { evaluation?: RunEvaluation }): React.ReactElement | null {
+  if (!evaluation) return null;
+
+  const styles: Record<string, string> = {
+    ok: "border-green-500/30 text-green-400 bg-green-500/5",
+    info: "border-blue-500/30 text-blue-400 bg-blue-500/5",
+    warning: "border-amber-500/30 text-amber-400 bg-amber-500/5",
+    critical: "border-red-500/30 text-red-400 bg-red-500/5",
+  };
+
+  const icons: Record<string, string> = {
+    ok: "✓",
+    info: "ℹ",
+    warning: "⚠",
+    critical: "!!",
+  };
+
+  return (
+    <span title={evaluation.summary + (evaluation.followUpReason ? `\n\nFollow-up: ${evaluation.followUpReason}` : "")}>
+      <Badge variant="outline" className={styles[evaluation.severity] ?? styles.info}>
+        {icons[evaluation.severity] ?? "?"}{" "}
+        {evaluation.followUpNeeded ? "needs follow-up" : evaluation.severity}
+      </Badge>
+    </span>
   );
 }
 
@@ -68,7 +95,7 @@ export function RunsTable({ runs, limit }: RunsTableProps): React.ReactElement {
         <TableRow>
           <TableHead className="w-[90px]">Status</TableHead>
           <TableHead>Job</TableHead>
-          <TableHead>Directory</TableHead>
+          <TableHead>Evaluation</TableHead>
           <TableHead className="w-[70px]">Trigger</TableHead>
           <TableHead className="w-[120px]">Started</TableHead>
           <TableHead className="w-[80px]">Duration</TableHead>
@@ -81,9 +108,23 @@ export function RunsTable({ runs, limit }: RunsTableProps): React.ReactElement {
             <TableCell>
               <StatusBadge status={run.status} />
             </TableCell>
-            <TableCell className="font-medium">{run.jobName}</TableCell>
-            <TableCell className="font-mono text-xs text-muted-foreground">
-              {run.directory.split("/").pop()}
+            <TableCell>
+              <div className="font-medium">{run.jobName}</div>
+              <div className="font-mono text-[11px] text-muted-foreground">
+                {run.directory.split("/").pop()}
+              </div>
+            </TableCell>
+            <TableCell>
+              {run.evaluation ? (
+                <div>
+                  <EvalBadge evaluation={run.evaluation} />
+                  <div className="text-[11px] text-muted-foreground mt-1 max-w-xs truncate">
+                    {run.evaluation.summary}
+                  </div>
+                </div>
+              ) : run.status === "running" ? (
+                <span className="text-xs text-muted-foreground">pending...</span>
+              ) : null}
             </TableCell>
             <TableCell>
               <Badge variant="outline" className="text-muted-foreground">

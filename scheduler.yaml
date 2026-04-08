@@ -168,3 +168,30 @@ jobs:
     timeout: 1800
     enabled: true
     tags: [weekly, personalized-helper, maintenance]
+
+  eod-report:
+    name: "EOD Report — End of Day Update"
+    schedule: "30 17 * * 1-5"            # Weekdays at 5:30 PM
+    directory: /Users/akorinek/Programming/ai-scheduler
+    prompt: |
+      Generate an autonomous end-of-day update. This runs unattended — do not ask for input.
+
+      1. Gather today's git activity across key repos:
+         - cd /Users/akorinek/Programming/ai-scheduler && git log --oneline --since="today 00:00" --author="$(git config user.name)" 2>/dev/null
+         - Check for open/merged PRs: gh pr list --author="@me" --state=open 2>/dev/null; gh pr list --author="@me" --state=merged --search="merged:$(date +%Y-%m-%d)" 2>/dev/null
+
+      2. Check today's scheduler run results in data/runs/ for context on what ran.
+
+      3. Format a concise EOD summary with:
+         - What was done (commits, PRs, completed tasks)
+         - Any blockers or items carrying over
+         - Keep it under a 10-second read
+
+      4. Save the EOD report to data/eod-$(date +%Y-%m-%d).md
+
+      5. Touch ~/.claude/eod-$(date +%Y-%m-%d) to mark EOD as done for today.
+    model: sonnet
+    skip_permissions: true
+    timeout: 300
+    enabled: true
+    tags: [daily, eod, reporting]

@@ -20,6 +20,14 @@ export interface JobResponse {
   isActive: boolean;
 }
 
+export interface RunEvaluation {
+  summary: string;
+  severity: "ok" | "info" | "warning" | "critical";
+  followUpNeeded: boolean;
+  followUpReason: string | null;
+  evaluatedAt: string;
+}
+
 export interface RunResponse {
   jobId: string;
   runId: string;
@@ -30,6 +38,7 @@ export interface RunResponse {
   startedAt: string;
   finishedAt: string | null;
   exitCode: number | null;
+  evaluation?: RunEvaluation;
 }
 
 export interface LogResponse {

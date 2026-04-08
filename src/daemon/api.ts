@@ -2,10 +2,12 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { CronEngine } from "./cron-engine";
-import { getRunsDir, getLogPath, getStatusPath, getMetaPath } from "@shared/paths";
-import type { RunSummary, RunMeta, RunStatusFile } from "@shared/types";
+import { loadConfig } from "./config";
+import { getRunsDir, getLogPath, getStatusPath, getMetaPath, getEvalPath } from "@shared/paths";
+import type { RunSummary, RunMeta, RunStatusFile, RunEvaluation } from "@shared/types";
 
 export function createApp(engine: CronEngine, projectRoot: string, startedAt: string): express.Express {
+  const configPath = path.join(projectRoot, "scheduler.yaml");
   const app = express();
   app.use(express.json());
 
@@ -72,6 +74,14 @@ export function createApp(engine: CronEngine, projectRoot: string, startedAt: st
 
           if (statusFilter && status.status !== statusFilter) continue;
 
+          let evaluation: RunEvaluation | undefined;
+          const evalPath = getEvalPath(projectRoot, jobId, runId);
+          try {
+            if (fs.existsSync(evalPath)) {
+              evaluation = JSON.parse(fs.readFileSync(evalPath, "utf-8"));
+            }
+          } catch { /* skip */ }
+
           runs.push({
             jobId,
             runId,
@@ -82,6 +92,7 @@ export function createApp(engine: CronEngine, projectRoot: string, startedAt: st
             startedAt: status.startedAt,
             finishedAt: status.finishedAt,
             exitCode: status.exitCode,
+            evaluation,
           });
         } catch {
           // skip corrupt run data
@@ -127,6 +138,19 @@ export function createApp(engine: CronEngine, projectRoot: string, startedAt: st
         done: isDone,
       });
     });
+  });
+
+  app.post("/api/reload", (_req, res) => {
+    const result = loadConfig(configPath);
+    if (result.success) {
+      engine.loadJobs(result.data);
+      const jobCount = Object.keys(result.data.jobs).length;
+      console.log(`[daemon] Config reloaded via API: ${jobCount} jobs`);
+      res.json({ ok: true, jobs: jobCount });
+    } else {
+      console.error(`[daemon] Config reload failed: ${result.error}`);
+      res.status(400).json({ ok: false, error: result.error });
+    }
   });
 
   app.post("/api/runs/:jobId/trigger", async (req, res) => {

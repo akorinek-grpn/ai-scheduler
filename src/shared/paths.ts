@@ -35,3 +35,7 @@ export function getDaemonJsonPath(projectRoot: string): string {
 export function getLatestSymlink(projectRoot: string, jobId: string): string {
   return path.join(getJobDir(projectRoot, jobId), "latest");
 }
+
+export function getEvalPath(projectRoot: string, jobId: string, runId: string): string {
+  return path.join(getRunDir(projectRoot, jobId, runId), "evaluation.json");
+}

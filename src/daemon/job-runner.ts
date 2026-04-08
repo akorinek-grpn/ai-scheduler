@@ -92,20 +92,30 @@ function extractTextFromStreamJson(line: string): string | null {
       return event.delta.text;
     }
 
-    // Tool result — show output
-    if (event.type === "tool_result") {
-      let text = "";
-      if (typeof event.content === "string") {
-        text = event.content;
-      } else if (Array.isArray(event.content)) {
-        text = event.content
-          .filter((b: { type: string }) => b.type === "text")
-          .map((b: { text: string }) => b.text)
-          .join("");
+    // Tool result — nested inside "user" message events
+    if (event.type === "user" && event.message?.content) {
+      const contents = Array.isArray(event.message.content)
+        ? event.message.content
+        : [event.message.content];
+
+      const parts: string[] = [];
+      for (const block of contents) {
+        if (block.type === "tool_result") {
+          let text = "";
+          if (typeof block.content === "string") {
+            text = block.content;
+          } else if (Array.isArray(block.content)) {
+            text = block.content
+              .filter((b: { type: string }) => b.type === "text")
+              .map((b: { text: string }) => b.text)
+              .join("");
+          }
+          if (text.trim()) {
+            parts.push(truncate(text, 50));
+          }
+        }
       }
-      if (text.trim()) {
-        return truncate(text, 50) + "\n";
-      }
+      if (parts.length > 0) return parts.join("\n") + "\n";
     }
 
     // Final result

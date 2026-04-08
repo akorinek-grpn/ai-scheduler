@@ -3,6 +3,7 @@ import type { SchedulerConfig } from "@shared/config-schema";
 import type { JobConfig } from "@shared/types";
 import { runJob } from "./job-runner";
 import { pruneOldRuns } from "./pruner";
+import { evaluateRun } from "./evaluator";
 
 export class CronEngine {
   private projectRoot: string;
@@ -70,6 +71,8 @@ export class CronEngine {
         defaultTimeout: config.defaults.timeout,
       });
       console.log(`[cron] Completed ${jobId}: ${result.status}`);
+      evaluateRun(this.projectRoot, jobId, result.runId, jobConfig.name, result.status, result.exitCode)
+        .catch((err) => console.error(`[eval] ${jobId}: evaluation failed:`, err));
       pruneOldRuns(this.projectRoot, jobId, config.defaults.retain_runs);
     } catch (err) {
       console.error(`[cron] Error running ${jobId}:`, err);
@@ -102,6 +105,8 @@ export class CronEngine {
         trigger: "manual",
         defaultTimeout: this.currentConfig.defaults.timeout,
       });
+      evaluateRun(this.projectRoot, jobId, result.runId, jobConfig.name, result.status, result.exitCode)
+        .catch((err) => console.error(`[eval] ${jobId}: evaluation failed:`, err));
       if (this.currentConfig) {
         pruneOldRuns(this.projectRoot, jobId, this.currentConfig.defaults.retain_runs);
       }

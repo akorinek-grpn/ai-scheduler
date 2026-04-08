@@ -50,6 +50,16 @@ export interface DaemonHealth {
   activeJobs: string[];
 }
 
+export type EvalSeverity = "ok" | "info" | "warning" | "critical";
+
+export interface RunEvaluation {
+  summary: string;
+  severity: EvalSeverity;
+  followUpNeeded: boolean;
+  followUpReason: string | null;
+  evaluatedAt: string;
+}
+
 export interface RunSummary {
   jobId: string;
   runId: string;
@@ -60,4 +70,5 @@ export interface RunSummary {
   startedAt: string;
   finishedAt: string | null;
   exitCode: number | null;
+  evaluation?: RunEvaluation;
 }
