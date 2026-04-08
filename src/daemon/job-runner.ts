@@ -113,6 +113,7 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
     options.args ??
     [
       "-p",
+      "--verbose",
       "--output-format", "stream-json",
       ...(jobConfig.skip_permissions ? ["--dangerously-skip-permissions"] : []),
       ...(jobConfig.model ? ["--model", jobConfig.model] : []),
