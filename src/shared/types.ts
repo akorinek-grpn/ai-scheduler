@@ -1,0 +1,62 @@
+export type RunStatus = "running" | "success" | "failed" | "timeout";
+export type TriggerType = "scheduled" | "manual";
+
+export interface JobConfig {
+  name: string;
+  schedule: string;
+  directory: string;
+  prompt: string;
+  enabled: boolean;
+  model?: string;
+  timeout?: number;
+  max_retries?: number;
+  tags: string[];
+}
+
+export interface SchedulerDefaults {
+  timeout: number;
+  max_retries: number;
+  retain_runs: number;
+}
+
+export interface SchedulerConfig {
+  version: number;
+  defaults: SchedulerDefaults;
+  jobs: Record<string, JobConfig>;
+}
+
+export interface RunMeta {
+  jobId: string;
+  runId: string;
+  jobConfig: JobConfig;
+  trigger: TriggerType;
+  startedAt: string;
+}
+
+export interface RunStatusFile {
+  status: RunStatus;
+  exitCode: number | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface DaemonHealth {
+  status: "running" | "stopped";
+  pid: number;
+  port: number;
+  startedAt: string;
+  lastHeartbeat: string;
+  activeJobs: string[];
+}
+
+export interface RunSummary {
+  jobId: string;
+  runId: string;
+  jobName: string;
+  directory: string;
+  status: RunStatus;
+  trigger: TriggerType;
+  startedAt: string;
+  finishedAt: string | null;
+  exitCode: number | null;
+}
