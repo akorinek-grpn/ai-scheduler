@@ -1,0 +1,8 @@
+version: 1
+
+defaults:
+  timeout: 300
+  max_retries: 0
+  retain_runs: 50
+
+jobs: {}
