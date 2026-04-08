@@ -28,15 +28,12 @@ mkdir -p "$SKILL_DIR"
 # Clean up old formats
 rm -f "$HOME/.claude/skills/ai-scheduler.md" 2>/dev/null
 
-if [ -L "$SKILL_TARGET" ]; then
-  rm "$SKILL_TARGET"
-elif [ -f "$SKILL_TARGET" ]; then
-  echo "  Replacing existing file with symlink"
+if [ -L "$SKILL_TARGET" ] || [ -f "$SKILL_TARGET" ]; then
   rm "$SKILL_TARGET"
 fi
 
-ln -s "$SKILL_SOURCE" "$SKILL_TARGET"
-echo "  Symlinked: $SKILL_TARGET -> $SKILL_SOURCE"
+cp "$SKILL_SOURCE" "$SKILL_TARGET"
+echo "  Installed: $SKILL_TARGET"
 echo ""
 
 # 4. Summary
