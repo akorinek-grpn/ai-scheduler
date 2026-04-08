@@ -68,8 +68,9 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
     [
       "-p",
       "--print",
-      jobConfig.prompt,
+      ...(jobConfig.skip_permissions ? ["--dangerously-skip-permissions"] : []),
       ...(jobConfig.model ? ["--model", jobConfig.model] : []),
+      jobConfig.prompt,
     ];
 
   const timeout = jobConfig.timeout ?? defaultTimeout;

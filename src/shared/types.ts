@@ -10,6 +10,7 @@ export interface JobConfig {
   model?: string;
   timeout?: number;
   max_retries?: number;
+  skip_permissions?: boolean;
   tags: string[];
 }
 

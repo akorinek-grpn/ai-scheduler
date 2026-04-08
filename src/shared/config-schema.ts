@@ -9,6 +9,7 @@ const jobSchema = z.object({
   model: z.string().optional(),
   timeout: z.number().positive().optional(),
   max_retries: z.number().int().min(0).optional(),
+  skip_permissions: z.boolean().default(false),
   tags: z.array(z.string()).default([]),
 });
 

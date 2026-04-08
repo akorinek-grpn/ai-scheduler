@@ -1,15 +1,163 @@
 version: 1
 
 defaults:
-  timeout: 300
+  timeout: 600
   max_retries: 0
-  retain_runs: 50
+  retain_runs: 30
 
 jobs:
-  hello-test:
-    name: "Hello Test"
-    schedule: "0 0 31 2 *"
-    directory: /tmp
-    prompt: "Say hello"
+  # === Daily Jobs ===
+
+  daily-ops:
+    name: "Daily Ops — Briefing & Summary"
+    schedule: "0 7 * * 1-5"
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    prompt: |
+      Run the daily executive workflow in order:
+      1. Morning briefing: bun run briefing
+      2. Daily summary: bun run summarize --today
+      3. Action item assessment: bun run assess-actions
+      Run each command, capture output, and report results. If any command fails, report the error but continue with the remaining commands.
+    model: sonnet
+    skip_permissions: true
+    timeout: 3600
     enabled: true
-    tags: [test]
+    tags: [daily, personalized-helper]
+
+  meeting-prep:
+    name: "Meeting Prep"
+    schedule: "0 8 * * 1-5"
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    prompt: |
+      Check today's calendar for upcoming meetings, then run the relevant prep scripts:
+      - For 1:1 meetings: bun run one-on-one
+      - For skip-level meetings: bun run skip-level
+      - For other key meetings: bun run prep
+      Run each applicable script and report what was generated. If no meetings today, just report that.
+      Note: NODE_TLS_REJECT_UNAUTHORIZED=0 should be set for LiteLLM calls.
+    model: sonnet
+    skip_permissions: true
+    timeout: 600
+    enabled: true
+    tags: [daily, personalized-helper, meetings]
+
+  data-ops:
+    name: "Data Ops — GSC Analytics Pipelines"
+    schedule: "0 6 * * *"
+    directory: /Users/akorinek/Programming/gsc-analytics
+    prompt: |
+      Run the daily data import scripts for the GSC Analytics dashboard:
+
+      1. Pingdom import:
+         node scripts/import-pingdom.mjs
+
+      2. CrUX backfill (watched URLs):
+         node scripts/backfill-watched-urls.mjs
+
+      3. If today is Monday (check with: date +%u), also run Lighthouse backfill:
+         node scripts/backfill-lighthouse.mjs
+
+      Run each script, capture both stdout and stderr, check exit codes.
+      If any script fails with auth errors (401, 403, missing API tokens), report it prominently.
+    model: sonnet
+    skip_permissions: true
+    timeout: 900
+    enabled: true
+    tags: [daily, gsc-analytics, data]
+
+  market-researcher:
+    name: "Market Research Pipeline"
+    schedule: "0 9 * * 1,4"
+    directory: /Users/akorinek/Programming/market-researcher
+    prompt: |
+      Run the market research CLI pipeline:
+        npm run cli
+
+      After completion, verify outputs:
+      - Check reports/ directory for generated HTML/JSON files with non-zero sizes
+      - Check .data/ directory for markfiles
+      Report what was generated and any errors encountered.
+    model: sonnet
+    skip_permissions: true
+    timeout: 1800
+    enabled: true
+    tags: [twice-weekly, market-researcher]
+
+  executive-review:
+    name: "Executive Review — Daily Summary"
+    schedule: "0 18 * * 1-5"
+    directory: /Users/akorinek/Programming/ai-scheduler
+    prompt: |
+      You are the executive review agent. Review today's scheduled run results and write a summary.
+
+      Read the run data from the data/runs/ directory. For each job that ran today:
+      1. Check data/runs/<job-id>/latest/status.json for the status and timing
+      2. Check data/runs/<job-id>/latest/output.log for a brief summary of what happened
+      3. Flag any failures, timeouts, or errors
+
+      Write a concise executive summary covering:
+      - How many jobs ran today, how many succeeded/failed
+      - Key outputs or highlights from each successful run
+      - Any failures that need attention (with error details)
+      - Any jobs that were scheduled but didn't run
+
+      Save the summary to data/daily-summary-$(date +%Y-%m-%d).md
+    model: sonnet
+    skip_permissions: true
+    timeout: 300
+    enabled: true
+    tags: [daily, meta, review]
+
+  # === Weekly Jobs ===
+
+  weekly-ops:
+    name: "Weekly Ops — Summary & Reports"
+    schedule: "0 7 * * 1"
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    prompt: |
+      Run the weekly executive workflow:
+      1. Weekly summary: bun run summarize --week
+      2. 5/15 report generation: bun run generate-515
+      3. Compliance check: bun run compliance --fresh
+      Run each command in order, capture output, and report results.
+    model: sonnet
+    skip_permissions: true
+    timeout: 600
+    enabled: true
+    tags: [weekly, personalized-helper]
+
+  skill-healer:
+    name: "Skill Healer — Weekly Improvement"
+    schedule: "0 3 * * 0"
+    directory: /Users/akorinek/Programming
+    prompt: |
+      Process accumulated session signals and improve Claude Code skills:
+      1. Read ~/.claude/self-heal/signals.jsonl for accumulated session signals
+      2. Analyze patterns: user corrections, tool failures, unused skills
+      3. For HIGH-confidence improvements, apply changes to the relevant skill .md files in ~/.claude/skills/
+      4. For lower-confidence findings, just report them
+      5. After processing, truncate the signals file to prevent reprocessing
+      Report what signals were found and what changes were made.
+    model: sonnet
+    skip_permissions: true
+    timeout: 600
+    enabled: true
+    tags: [weekly, skills, meta]
+
+  codebase-maintainer:
+    name: "Codebase Maintainer — Personalized Helper"
+    schedule: "0 4 * * 6"
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    prompt: |
+      Maintain the personalized-helper codebase:
+      1. Sync CLAUDE.md: bun run sync-claude-md
+      2. Run tests: bun test
+      3. Check for outdated dependencies: bun outdated (or npm outdated)
+      4. Review scripts and lib code for potential improvements
+      Report test results, any dependency issues, and improvement suggestions.
+      Do NOT make code changes — just report findings.
+    model: sonnet
+    skip_permissions: true
+    timeout: 1800
+    enabled: true
+    tags: [weekly, personalized-helper, maintenance]
