@@ -1,11 +1,9 @@
 import { spawn } from "child_process";
 import fs from "fs";
-import path from "path";
 import crypto from "crypto";
 import type { JobConfig, TriggerType, RunMeta, RunStatusFile } from "@shared/types";
 import {
   getRunDir,
-  getJobDir,
   getLogPath,
   getStatusPath,
   getMetaPath,
@@ -33,6 +31,52 @@ function generateRunId(): string {
   const timestamp = now.toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const hash = crypto.randomBytes(3).toString("hex");
   return `${timestamp}-${hash}`;
+}
+
+function extractTextFromStreamJson(line: string): string | null {
+  try {
+    const event = JSON.parse(line);
+
+    // Assistant message text content
+    if (event.type === "assistant" && event.message?.content) {
+      const texts = event.message.content
+        .filter((b: { type: string }) => b.type === "text")
+        .map((b: { text: string }) => b.text);
+      if (texts.length > 0) return texts.join("");
+    }
+
+    // Content block delta (streaming partial text)
+    if (event.type === "content_block_delta" && event.delta?.text) {
+      return event.delta.text;
+    }
+
+    // Result message at the end
+    if (event.type === "result" && event.result?.trim()) {
+      return event.result;
+    }
+
+    // Tool use — log what tool is being called
+    if (event.type === "assistant" && event.message?.content) {
+      for (const block of event.message.content) {
+        if (block.type === "tool_use") {
+          return `[tool: ${block.name}]\n`;
+        }
+      }
+    }
+
+    // Tool result — log output
+    if (event.type === "tool_result" && event.content) {
+      const text = typeof event.content === "string"
+        ? event.content
+        : Array.isArray(event.content)
+          ? event.content.filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("")
+          : "";
+      if (text) return `${text}\n`;
+    }
+  } catch {
+    // Not valid JSON — could be partial line, ignore
+  }
+  return null;
 }
 
 export async function runJob(options: RunJobOptions): Promise<RunResult> {
@@ -63,11 +107,13 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
   const logStream = fs.createWriteStream(logPath, { flags: "a" });
 
   const command = options.command ?? "claude";
+  const isCustomCommand = options.command !== undefined || options.args !== undefined;
+
   const args =
     options.args ??
     [
       "-p",
-      "--print",
+      "--output-format", "stream-json",
       ...(jobConfig.skip_permissions ? ["--dangerously-skip-permissions"] : []),
       ...(jobConfig.model ? ["--model", jobConfig.model] : []),
       jobConfig.prompt,
@@ -82,7 +128,28 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    child.stdout.pipe(logStream);
+    if (isCustomCommand) {
+      // For test commands (echo, sh, etc.) — pipe directly
+      child.stdout.pipe(logStream);
+    } else {
+      // For claude with stream-json — parse events and extract text
+      let buffer = "";
+      child.stdout.on("data", (chunk: Buffer) => {
+        buffer += chunk.toString();
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          const text = extractTextFromStreamJson(trimmed);
+          if (text) {
+            logStream.write(text);
+          }
+        }
+      });
+    }
+
     child.stderr.pipe(logStream);
 
     let isTimedOut = false;
