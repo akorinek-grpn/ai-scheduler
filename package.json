@@ -6,8 +6,8 @@
   "scripts": {
     "daemon": "tsx src/daemon/index.ts",
     "daemon:watch": "tsx watch src/daemon/index.ts",
-    "dev": "next dev --port 3500 --turbopack",
-    "build": "next build",
+    "dev": "next dev src/web --port 3500 --turbopack",
+    "build": "next build src/web",
     "test": "vitest run",
     "test:watch": "vitest"
   },
