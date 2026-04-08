@@ -5,4 +5,11 @@ defaults:
   max_retries: 0
   retain_runs: 50
 
-jobs: {}
+jobs:
+  hello-test:
+    name: "Hello Test"
+    schedule: "0 0 31 2 *"
+    directory: /tmp
+    prompt: "Say hello"
+    enabled: true
+    tags: [test]
