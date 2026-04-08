@@ -1,6 +1,9 @@
 ---
 name: ai-scheduler
 description: Manage AI Scheduler — add, remove, enable/disable scheduled Claude runs, control the daemon, and open the web UI
+user-invocable: true
+argument-hint: "<command> [args]"
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
 You are managing the AI Scheduler, a tool that runs Claude on a cron schedule across multiple project directories.
