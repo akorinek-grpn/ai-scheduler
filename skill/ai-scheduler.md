@@ -5,19 +5,21 @@ description: Manage AI Scheduler — add, remove, enable/disable scheduled Claud
 
 You are managing the AI Scheduler, a tool that runs Claude on a cron schedule across multiple project directories.
 
-**Config file location:** Look for `scheduler.yaml` by checking these in order:
-1. The `AI_SCHEDULER_ROOT` environment variable (if set)
-2. Search upward from the current directory for a `scheduler.yaml` file
-3. `~/Programming/ai-scheduler/scheduler.yaml`
+## Finding the project
 
-**Project root:** The directory containing `scheduler.yaml`.
+Before any operation, locate the project root. Try in order:
+1. Check if `scheduler.yaml` exists in the current directory
+2. Search upward from the current directory for `scheduler.yaml`
+3. Check `~/Programming/ai-scheduler/scheduler.yaml`
+
+Once found, all paths below are relative to that project root.
 
 ## Commands
 
 Parse the user's intent and execute one of these actions:
 
 ### Add a job
-Read the current `scheduler.yaml`, add a new job entry under `jobs:`, and write it back. Generate a slug-style job ID from the name (e.g., "Review PRs" → `review-prs`).
+Read `scheduler.yaml`, add a new job entry under `jobs:`, and write it back. Generate a slug-style job ID from the name (e.g., "Review PRs" → `review-prs`).
 
 Required info (ask if not provided):
 - **name**: human-readable name
