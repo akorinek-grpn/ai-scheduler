@@ -4,25 +4,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { JobResponse, RunResponse } from "@/lib/api-client";
 import { triggerJob } from "@/lib/api-client";
+import { formatCronHuman } from "@/lib/format-cron";
 import { useState } from "react";
 
 interface JobCardProps {
   job: JobResponse;
   lastRun?: RunResponse;
   onTrigger: () => void;
-}
-
-function formatCronHuman(cron: string): string {
-  const parts = cron.split(" ");
-  if (parts.length !== 5) return cron;
-  const [min, hour, _dom, _mon, dow] = parts;
-  const time = `${hour.padStart(2, "0")}:${min.padStart(2, "0")}`;
-
-  if (dow === "*") return `Daily at ${time}`;
-  if (dow === "1-5") return `Weekdays at ${time}`;
-  if (dow === "1") return `Mondays at ${time}`;
-  if (dow === "3") return `Wednesdays at ${time}`;
-  return `${time} (${cron})`;
 }
 
 export function JobCard({ job, lastRun, onTrigger }: JobCardProps): React.ReactElement {

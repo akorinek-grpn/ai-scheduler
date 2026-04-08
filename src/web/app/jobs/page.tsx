@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getJobs, getRuns, triggerJob, type JobResponse, type RunResponse } from "@/lib/api-client";
+import { formatCronHuman } from "@/lib/format-cron";
 
 export default function JobsPage(): React.ReactElement {
   const [jobs, setJobs] = useState<JobResponse[]>([]);
@@ -95,7 +96,7 @@ export default function JobsPage(): React.ReactElement {
                   <div className="text-xs text-muted-foreground mt-1">
                     <span className="font-mono">{job.directory}</span>
                     <span className="mx-2">·</span>
-                    <span>{job.schedule}</span>
+                    <span>{formatCronHuman(job.schedule)}</span>
                     {job.model && <><span className="mx-2">·</span><span>model: {job.model}</span></>}
                   </div>
                   <div className="text-xs text-zinc-600 mt-1 max-w-xl truncate">{job.prompt}</div>

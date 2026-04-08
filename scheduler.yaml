@@ -1,3 +1,6 @@
+# AI Scheduler Configuration
+# All times are in local system timezone (CEST / UTC+2)
+
 version: 1
 
 defaults:
@@ -6,44 +9,13 @@ defaults:
   retain_runs: 30
 
 jobs:
-  # === Daily Jobs ===
-
-  daily-ops:
-    name: "Daily Ops — Briefing & Summary"
-    schedule: "0 7 * * 1-5"
-    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
-    prompt: |
-      Run the daily executive workflow in order:
-      1. Morning briefing: bun run briefing
-      2. Daily summary: bun run summarize --today
-      3. Action item assessment: bun run assess-actions
-      Run each command, capture output, and report results. If any command fails, report the error but continue with the remaining commands.
-    model: sonnet
-    skip_permissions: true
-    timeout: 3600
-    enabled: true
-    tags: [daily, personalized-helper]
-
-  meeting-prep:
-    name: "Meeting Prep"
-    schedule: "0 8 * * 1-5"
-    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
-    prompt: |
-      Check today's calendar for upcoming meetings, then run the relevant prep scripts:
-      - For 1:1 meetings: bun run one-on-one
-      - For skip-level meetings: bun run skip-level
-      - For other key meetings: bun run prep
-      Run each applicable script and report what was generated. If no meetings today, just report that.
-      Note: NODE_TLS_REJECT_UNAUTHORIZED=0 should be set for LiteLLM calls.
-    model: sonnet
-    skip_permissions: true
-    timeout: 600
-    enabled: true
-    tags: [daily, personalized-helper, meetings]
+  # ┌─────────────────────────────────────────────────────────┐
+  # │  DAILY JOBS                                             │
+  # └─────────────────────────────────────────────────────────┘
 
   data-ops:
     name: "Data Ops — GSC Analytics Pipelines"
-    schedule: "0 6 * * *"
+    schedule: "0 6 * * *"              # Every day at 6:00 AM
     directory: /Users/akorinek/Programming/gsc-analytics
     prompt: |
       Run the daily data import scripts for the GSC Analytics dashboard:
@@ -65,9 +37,42 @@ jobs:
     enabled: true
     tags: [daily, gsc-analytics, data]
 
+  daily-ops:
+    name: "Daily Ops — Briefing & Summary"
+    schedule: "0 7 * * 1-5"           # Weekdays at 7:00 AM
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    prompt: |
+      Run the daily executive workflow in order:
+      1. Morning briefing: bun run briefing
+      2. Daily summary: bun run summarize --today
+      3. Action item assessment: bun run assess-actions
+      Run each command, capture output, and report results. If any command fails, report the error but continue with the remaining commands.
+    model: sonnet
+    skip_permissions: true
+    timeout: 3600
+    enabled: true
+    tags: [daily, personalized-helper]
+
+  meeting-prep:
+    name: "Meeting Prep"
+    schedule: "0 8 * * 1-5"           # Weekdays at 8:00 AM
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    prompt: |
+      Check today's calendar for upcoming meetings, then run the relevant prep scripts:
+      - For 1:1 meetings: bun run one-on-one
+      - For skip-level meetings: bun run skip-level
+      - For other key meetings: bun run prep
+      Run each applicable script and report what was generated. If no meetings today, just report that.
+      Note: NODE_TLS_REJECT_UNAUTHORIZED=0 should be set for LiteLLM calls.
+    model: sonnet
+    skip_permissions: true
+    timeout: 600
+    enabled: true
+    tags: [daily, personalized-helper, meetings]
+
   market-researcher:
     name: "Market Research Pipeline"
-    schedule: "0 9 * * 1,4"
+    schedule: "0 9 * * 1,4"           # Monday & Thursday at 9:00 AM
     directory: /Users/akorinek/Programming/market-researcher
     prompt: |
       Run the market research CLI pipeline:
@@ -85,7 +90,7 @@ jobs:
 
   executive-review:
     name: "Executive Review — Daily Summary"
-    schedule: "0 18 * * 1-5"
+    schedule: "0 18 * * 1-5"          # Weekdays at 6:00 PM
     directory: /Users/akorinek/Programming/ai-scheduler
     prompt: |
       You are the executive review agent. Review today's scheduled run results and write a summary.
@@ -108,11 +113,13 @@ jobs:
     enabled: true
     tags: [daily, meta, review]
 
-  # === Weekly Jobs ===
+  # ┌─────────────────────────────────────────────────────────┐
+  # │  WEEKLY JOBS                                            │
+  # └─────────────────────────────────────────────────────────┘
 
   weekly-ops:
     name: "Weekly Ops — Summary & Reports"
-    schedule: "0 7 * * 1"
+    schedule: "0 7 * * 1"             # Monday at 7:00 AM
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     prompt: |
       Run the weekly executive workflow:
@@ -128,7 +135,7 @@ jobs:
 
   skill-healer:
     name: "Skill Healer — Weekly Improvement"
-    schedule: "0 3 * * 0"
+    schedule: "0 3 * * 0"             # Sunday at 3:00 AM
     directory: /Users/akorinek/Programming
     prompt: |
       Process accumulated session signals and improve Claude Code skills:
@@ -146,7 +153,7 @@ jobs:
 
   codebase-maintainer:
     name: "Codebase Maintainer — Personalized Helper"
-    schedule: "0 4 * * 6"
+    schedule: "0 4 * * 6"             # Saturday at 4:00 AM
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     prompt: |
       Maintain the personalized-helper codebase:
