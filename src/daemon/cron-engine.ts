@@ -2,6 +2,7 @@ import cron, { type ScheduledTask } from "node-cron";
 import type { SchedulerConfig } from "@shared/config-schema";
 import type { JobConfig } from "@shared/types";
 import { runJob } from "./job-runner";
+import { pruneOldRuns } from "./pruner";
 
 export class CronEngine {
   private projectRoot: string;
@@ -69,6 +70,7 @@ export class CronEngine {
         defaultTimeout: config.defaults.timeout,
       });
       console.log(`[cron] Completed ${jobId}: ${result.status}`);
+      pruneOldRuns(this.projectRoot, jobId, config.defaults.retain_runs);
     } catch (err) {
       console.error(`[cron] Error running ${jobId}:`, err);
     } finally {
@@ -100,6 +102,9 @@ export class CronEngine {
         trigger: "manual",
         defaultTimeout: this.currentConfig.defaults.timeout,
       });
+      if (this.currentConfig) {
+        pruneOldRuns(this.projectRoot, jobId, this.currentConfig.defaults.retain_runs);
+      }
       return { runId: result.runId };
     } finally {
       this.activeJobs.delete(jobId);
