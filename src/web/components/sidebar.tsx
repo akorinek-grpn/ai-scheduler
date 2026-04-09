@@ -86,7 +86,7 @@ export function Sidebar(): React.ReactElement {
           </span>
         </div>
         {health && (
-          <div className="px-3 text-[11px] text-zinc-600">
+          <div className="px-3 text-xs text-zinc-600">
             PID {health.pid}
           </div>
         )}

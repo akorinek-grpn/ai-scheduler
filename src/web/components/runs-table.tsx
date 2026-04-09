@@ -32,38 +32,65 @@ function StatusBadge({ status }: { status: RunResponse["status"] }): React.React
       {status === "running" && (
         <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-yellow-500" />
       )}
-      {status === "success" && <span className="mr-1">✓</span>}
-      {status === "failed" && <span className="mr-1">✗</span>}
-      {status === "timeout" && <span className="mr-1">⏱</span>}
+      {status === "success" && <span className="mr-1">{"\u2713"}</span>}
+      {status === "failed" && <span className="mr-1">{"\u2717"}</span>}
+      {status === "timeout" && <span className="mr-1">{"\u23F1"}</span>}
       {v.label}
     </Badge>
   );
 }
 
-function EvalBadge({ evaluation }: { evaluation?: RunEvaluation }): React.ReactElement | null {
+const evalStyles: Record<string, { badge: string; row: string }> = {
+  ok: {
+    badge: "border-green-500/30 text-green-400 bg-green-500/5",
+    row: "border-l-green-500/40",
+  },
+  info: {
+    badge: "border-blue-500/30 text-blue-400 bg-blue-500/5",
+    row: "border-l-blue-500/40",
+  },
+  warning: {
+    badge: "border-amber-500/30 text-amber-400 bg-amber-500/5",
+    row: "border-l-amber-500/40",
+  },
+  critical: {
+    badge: "border-red-500/30 text-red-400 bg-red-500/5",
+    row: "border-l-red-500/40",
+  },
+};
+
+function EvalCell({ evaluation }: { evaluation?: RunEvaluation }): React.ReactElement | null {
   if (!evaluation) return null;
 
-  const styles: Record<string, string> = {
-    ok: "border-green-500/30 text-green-400 bg-green-500/5",
-    info: "border-blue-500/30 text-blue-400 bg-blue-500/5",
-    warning: "border-amber-500/30 text-amber-400 bg-amber-500/5",
-    critical: "border-red-500/30 text-red-400 bg-red-500/5",
-  };
-
+  const style = evalStyles[evaluation.severity] ?? evalStyles.info;
   const icons: Record<string, string> = {
-    ok: "✓",
-    info: "ℹ",
-    warning: "⚠",
+    ok: "\u2713",
+    info: "\u2139",
+    warning: "\u26A0",
     critical: "!!",
   };
 
   return (
-    <span title={evaluation.summary + (evaluation.followUpReason ? `\n\nFollow-up: ${evaluation.followUpReason}` : "")}>
-      <Badge variant="outline" className={styles[evaluation.severity] ?? styles.info}>
-        {icons[evaluation.severity] ?? "?"}{" "}
-        {evaluation.followUpNeeded ? "needs follow-up" : evaluation.severity}
-      </Badge>
-    </span>
+    <div className="space-y-1">
+      <div className="flex items-center gap-1.5">
+        <Badge variant="outline" className={`text-[10px] ${style.badge}`}>
+          {icons[evaluation.severity] ?? "?"} {evaluation.severity}
+        </Badge>
+        {evaluation.followUpNeeded && (
+          <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-400 bg-amber-500/5">
+            follow-up
+          </Badge>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
+        {evaluation.summary}
+      </p>
+      {evaluation.followUpReason && (
+        <p className="text-[10px] text-muted-foreground/60 leading-relaxed line-clamp-1">
+          {evaluation.followUpReason}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -94,8 +121,8 @@ export function RunsTable({ runs, limit }: RunsTableProps): React.ReactElement {
       <TableHeader>
         <TableRow>
           <TableHead className="w-[90px]">Status</TableHead>
-          <TableHead>Job</TableHead>
-          <TableHead>Evaluation</TableHead>
+          <TableHead className="w-[140px]">Job</TableHead>
+          <TableHead>AI Evaluation</TableHead>
           <TableHead className="w-[70px]">Trigger</TableHead>
           <TableHead className="w-[120px]">Started</TableHead>
           <TableHead className="w-[80px]">Duration</TableHead>
@@ -103,49 +130,52 @@ export function RunsTable({ runs, limit }: RunsTableProps): React.ReactElement {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {displayRuns.map((run) => (
-          <TableRow key={`${run.jobId}-${run.runId}`}>
-            <TableCell>
-              <StatusBadge status={run.status} />
-            </TableCell>
-            <TableCell>
-              <div className="font-medium">{run.jobName}</div>
-              <div className="font-mono text-[11px] text-muted-foreground">
-                {run.directory.split("/").pop()}
-              </div>
-            </TableCell>
-            <TableCell>
-              {run.evaluation ? (
-                <div>
-                  <EvalBadge evaluation={run.evaluation} />
-                  <div className="text-[11px] text-muted-foreground mt-1 max-w-xs truncate">
-                    {run.evaluation.summary}
-                  </div>
+        {displayRuns.map((run) => {
+          const rowBorder = run.evaluation
+            ? evalStyles[run.evaluation.severity]?.row ?? ""
+            : "";
+          return (
+            <TableRow
+              key={`${run.jobId}-${run.runId}`}
+              className={rowBorder ? `border-l-2 ${rowBorder}` : ""}
+            >
+              <TableCell>
+                <StatusBadge status={run.status} />
+              </TableCell>
+              <TableCell>
+                <div className="font-medium">{run.jobName}</div>
+                <div className="font-mono text-xs text-muted-foreground">
+                  {run.directory.split("/").pop()}
                 </div>
-              ) : run.status === "running" ? (
-                <span className="text-xs text-muted-foreground">pending...</span>
-              ) : null}
-            </TableCell>
-            <TableCell>
-              <Badge variant="outline" className="text-muted-foreground">
-                {run.trigger}
-              </Badge>
-            </TableCell>
-            <TableCell className="text-sm text-muted-foreground">
-              {formatTime(run.startedAt)}
-            </TableCell>
-            <TableCell className="font-mono text-sm text-muted-foreground">
-              {formatDuration(run.startedAt, run.finishedAt)}
-            </TableCell>
-            <TableCell>
-              <Link href={`/runs/${run.jobId}/${run.runId}`}>
-                <Button variant="outline" size="sm" className="text-xs">
-                  {run.status === "running" ? "Watch" : "Logs"}
-                </Button>
-              </Link>
-            </TableCell>
-          </TableRow>
-        ))}
+              </TableCell>
+              <TableCell>
+                {run.evaluation ? (
+                  <EvalCell evaluation={run.evaluation} />
+                ) : run.status === "running" ? (
+                  <span className="text-xs text-muted-foreground italic">evaluating after run...</span>
+                ) : null}
+              </TableCell>
+              <TableCell>
+                <Badge variant="outline" className="text-muted-foreground">
+                  {run.trigger}
+                </Badge>
+              </TableCell>
+              <TableCell className="text-sm text-muted-foreground">
+                {formatTime(run.startedAt)}
+              </TableCell>
+              <TableCell className="font-mono text-sm text-muted-foreground">
+                {formatDuration(run.startedAt, run.finishedAt)}
+              </TableCell>
+              <TableCell>
+                <Link href={`/runs/${run.jobId}/${run.runId}`}>
+                  <Button variant="outline" size="sm" className="text-xs">
+                    {run.status === "running" ? "Watch" : "Logs"}
+                  </Button>
+                </Link>
+              </TableCell>
+            </TableRow>
+          );
+        })}
         {displayRuns.length === 0 && (
           <TableRow>
             <TableCell colSpan={7} className="text-center text-muted-foreground py-8">

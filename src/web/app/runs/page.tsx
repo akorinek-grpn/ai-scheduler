@@ -38,9 +38,9 @@ export default function RunHistoryPage(): React.ReactElement {
         <p className="text-sm text-muted-foreground mt-1">All runs across all jobs</p>
       </div>
 
-      <div className="flex gap-4">
-        <div className="flex gap-2 items-center">
-          <span className="text-xs text-muted-foreground">Job:</span>
+      <div className="space-y-2">
+        <div className="flex gap-2 items-center flex-wrap">
+          <span className="text-xs text-muted-foreground shrink-0 w-12">Job:</span>
           <Button
             variant={jobFilter === null ? "secondary" : "ghost"}
             size="sm"
@@ -59,8 +59,15 @@ export default function RunHistoryPage(): React.ReactElement {
             </Button>
           ))}
         </div>
-        <div className="flex gap-2 items-center">
-          <span className="text-xs text-muted-foreground">Status:</span>
+        <div className="flex gap-2 items-center flex-wrap">
+          <span className="text-xs text-muted-foreground shrink-0 w-12">Status:</span>
+          <Button
+            variant={statusFilter === null ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => setStatusFilter(null)}
+          >
+            All
+          </Button>
           {["success", "failed", "running", "timeout"].map((s) => (
             <Button
               key={s}

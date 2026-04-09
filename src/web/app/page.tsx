@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatsCards } from "@/components/stats-cards";
 import { RunsTable } from "@/components/runs-table";
 import { JobCard } from "@/components/job-card";
+import { AiInsights } from "@/components/ai-insights";
 import {
   getHealth,
   getJobs,
@@ -24,7 +25,7 @@ export default function DashboardPage(): React.ReactElement {
       const [h, j, r] = await Promise.all([
         getHealth().catch(() => null),
         getJobs().catch(() => []),
-        getRuns({ limit: 20 }).catch(() => []),
+        getRuns({ limit: 50 }).catch(() => []),
       ]);
       setHealth(h);
       setJobs(j);
@@ -40,8 +41,8 @@ export default function DashboardPage(): React.ReactElement {
     return () => clearInterval(interval);
   }, [fetchAll]);
 
-  const getLastRun = (jobId: string): RunResponse | undefined => {
-    return runs.find((r) => r.jobId === jobId);
+  const getJobRuns = (jobId: string): RunResponse[] => {
+    return runs.filter((r) => r.jobId === jobId).slice(0, 10);
   };
 
   return (
@@ -55,6 +56,8 @@ export default function DashboardPage(): React.ReactElement {
 
       <StatsCards jobs={jobs} runs={runs} health={health} />
 
+      <AiInsights runs={runs} />
+
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-semibold">Recent Runs</CardTitle>
@@ -66,12 +69,12 @@ export default function DashboardPage(): React.ReactElement {
 
       <div>
         <h2 className="text-sm font-semibold mb-3">Jobs</h2>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {jobs.map((job) => (
             <JobCard
               key={job.id}
               job={job}
-              lastRun={getLastRun(job.id)}
+              recentRuns={getJobRuns(job.id)}
               onTrigger={fetchAll}
             />
           ))}

@@ -12,11 +12,13 @@ export default function RunDetailPage(): React.ReactElement {
   const params = useParams<{ jobId: string; runId: string }>();
   const router = useRouter();
   const [run, setRun] = useState<RunResponse | null>(null);
+  const [siblingRuns, setSiblingRuns] = useState<RunResponse[]>([]);
 
   useEffect(() => {
     const poll = () => {
       getRuns({ job: params.jobId })
         .then((runs) => {
+          setSiblingRuns(runs);
           const found = runs.find((r) => r.runId === params.runId);
           if (found) setRun(found);
         })
@@ -35,39 +37,67 @@ export default function RunDetailPage(): React.ReactElement {
   };
 
   const evalStyles: Record<string, { border: string; bg: string; text: string; icon: string }> = {
-    ok: { border: "border-green-500/30", bg: "bg-green-500/5", text: "text-green-400", icon: "✓" },
-    info: { border: "border-blue-500/30", bg: "bg-blue-500/5", text: "text-blue-400", icon: "ℹ" },
-    warning: { border: "border-amber-500/30", bg: "bg-amber-500/5", text: "text-amber-400", icon: "⚠" },
+    ok: { border: "border-green-500/30", bg: "bg-green-500/5", text: "text-green-400", icon: "\u2713" },
+    info: { border: "border-blue-500/30", bg: "bg-blue-500/5", text: "text-blue-400", icon: "\u2139" },
+    warning: { border: "border-amber-500/30", bg: "bg-amber-500/5", text: "text-amber-400", icon: "\u26A0" },
     critical: { border: "border-red-500/30", bg: "bg-red-500/5", text: "text-red-400", icon: "!!" },
   };
 
   const evalData = run?.evaluation;
   const es = evalData ? evalStyles[evalData.severity] ?? evalStyles.info : null;
 
+  // Prev/next navigation
+  const currentIndex = siblingRuns.findIndex((r) => r.runId === params.runId);
+  const prevRun = currentIndex < siblingRuns.length - 1 ? siblingRuns[currentIndex + 1] : null;
+  const nextRun = currentIndex > 0 ? siblingRuns[currentIndex - 1] : null;
+
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-3 mb-4">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
         <Button variant="outline" size="sm" onClick={() => router.back()}>
-          ← Back
+          {"\u2190"} Back
         </Button>
-        <div>
-          <h1 className="text-lg font-semibold">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-lg font-semibold truncate">
             {run?.jobName ?? params.jobId}
           </h1>
-          <p className="text-xs text-muted-foreground font-mono">{params.runId}</p>
+          <p className="text-xs text-muted-foreground font-mono truncate">{params.runId}</p>
         </div>
         {run && (
           <Badge variant="outline" className={statusColors[run.status] ?? ""}>
+            {run.status === "running" && (
+              <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-yellow-500" />
+            )}
             {run.status}
           </Badge>
         )}
-        {run?.finishedAt && (
-          <span className="text-xs text-muted-foreground ml-auto">
-            Exit code: {run.exitCode}
-          </span>
-        )}
+        <div className="flex items-center gap-1 ml-auto">
+          {run?.finishedAt && (
+            <span className="text-xs text-muted-foreground mr-3">
+              Exit code: {run.exitCode}
+            </span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!prevRun}
+            onClick={() => prevRun && router.push(`/runs/${params.jobId}/${prevRun.runId}`)}
+          >
+            {"\u2190"} Prev
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!nextRun}
+            onClick={() => nextRun && router.push(`/runs/${params.jobId}/${nextRun.runId}`)}
+          >
+            Next {"\u2192"}
+          </Button>
+        </div>
       </div>
 
+      {/* AI Evaluation Card */}
       {evalData && es && (
         <Card className={`mb-4 ${es.border} ${es.bg}`}>
           <CardContent className="py-3">
@@ -76,15 +106,24 @@ export default function RunDetailPage(): React.ReactElement {
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
                   <span className={`text-sm font-medium ${es.text}`}>
-                    {evalData.severity.charAt(0).toUpperCase() + evalData.severity.slice(1)}
-                    {evalData.followUpNeeded && " — Follow-up needed"}
+                    AI Evaluation — {evalData.severity.charAt(0).toUpperCase() + evalData.severity.slice(1)}
                   </span>
+                  {evalData.followUpNeeded && (
+                    <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-400">
+                      follow-up needed
+                    </Badge>
+                  )}
                 </div>
-                <p className="text-sm text-muted-foreground">{evalData.summary}</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">{evalData.summary}</p>
                 {evalData.followUpReason && (
-                  <p className="text-sm mt-1">
-                    <span className="text-muted-foreground">Reason: </span>
-                    {evalData.followUpReason}
+                  <p className="text-sm mt-2">
+                    <span className="text-muted-foreground font-medium">Follow-up reason: </span>
+                    <span className="text-foreground/80">{evalData.followUpReason}</span>
+                  </p>
+                )}
+                {evalData.evaluatedAt && (
+                  <p className="text-xs text-muted-foreground/50 mt-2">
+                    Evaluated {new Date(evalData.evaluatedAt).toLocaleString()}
                   </p>
                 )}
               </div>

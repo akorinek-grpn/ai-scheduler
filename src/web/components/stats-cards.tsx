@@ -9,7 +9,12 @@ interface StatsCardsProps {
   health: HealthResponse | null;
 }
 
+function Skeleton({ className }: { className?: string }): React.ReactElement {
+  return <div className={`animate-pulse rounded bg-secondary ${className ?? ""}`} />;
+}
+
 export function StatsCards({ jobs, runs, health }: StatsCardsProps): React.ReactElement {
+  const isLoading = jobs.length === 0 && !health;
   const enabledCount = jobs.filter((j) => j.enabled).length;
   const todayRuns = runs.filter((r) => {
     const runDate = new Date(r.startedAt).toDateString();
@@ -19,9 +24,28 @@ export function StatsCards({ jobs, runs, health }: StatsCardsProps): React.React
   const failedCount = todayRuns.filter((r) => r.status === "failed").length;
   const runningCount = todayRuns.filter((r) => r.status === "running").length;
   const activeRun = runs.find((r) => r.status === "running");
+  const followUpCount = runs.filter((r) => r.evaluation?.followUpNeeded).length;
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Card key={i}>
+            <CardHeader className="pb-2">
+              <Skeleton className="h-3 w-20" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-8 w-12 mb-2" />
+              <Skeleton className="h-3 w-24" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
+  }
 
   return (
-    <div className="grid grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-xs font-medium text-muted-foreground">Total Jobs</CardTitle>
@@ -50,18 +74,27 @@ export function StatsCards({ jobs, runs, health }: StatsCardsProps): React.React
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-xs font-medium text-muted-foreground">Active Run</CardTitle>
+          <CardTitle className="text-xs font-medium text-muted-foreground">
+            {followUpCount > 0 ? "Needs Attention" : "Active Run"}
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          {activeRun ? (
+          {followUpCount > 0 ? (
             <>
-              <div className="text-xl font-semibold text-yellow-500">{activeRun.jobName}</div>
+              <div className="text-3xl font-bold text-amber-500">{followUpCount}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {followUpCount === 1 ? "run needs" : "runs need"} follow-up
+              </p>
+            </>
+          ) : activeRun ? (
+            <>
+              <div className="text-xl font-semibold text-yellow-500 truncate">{activeRun.jobName}</div>
               <p className="text-xs text-muted-foreground mt-1">Running...</p>
             </>
           ) : (
             <>
-              <div className="text-xl font-semibold text-muted-foreground">None</div>
-              <p className="text-xs text-muted-foreground mt-1">All idle</p>
+              <div className="text-xl font-semibold text-muted-foreground">All clear</div>
+              <p className="text-xs text-muted-foreground mt-1">No follow-ups needed</p>
             </>
           )}
         </CardContent>
