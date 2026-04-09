@@ -18,6 +18,13 @@ if [ -f "$DAEMON_JSON" ]; then
   rm -f "$DAEMON_JSON"
 fi
 
+# Load .env if present
+if [ -f "$PROJECT_ROOT/.env" ]; then
+  set -a
+  source "$PROJECT_ROOT/.env"
+  set +a
+fi
+
 echo "Starting AI Scheduler daemon..."
 nohup npx tsx "$PROJECT_ROOT/src/daemon/index.ts" >> "$DATA_DIR/daemon.log" 2>&1 &
 DAEMON_PID=$!

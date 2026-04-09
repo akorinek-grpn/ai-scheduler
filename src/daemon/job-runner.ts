@@ -155,19 +155,32 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
   const logPath = getLogPath(projectRoot, jobId, runId);
   const logStream = fs.createWriteStream(logPath, { flags: "a" });
 
-  const command = options.command ?? "claude";
-  const isCustomCommand = options.command !== undefined || options.args !== undefined;
+  const isScript = jobConfig.type === "script";
+  let command: string;
+  let args: string[];
 
-  const args =
-    options.args ??
-    [
+  if (options.command !== undefined || options.args !== undefined) {
+    // Explicit override (e.g., from tests)
+    command = options.command ?? "claude";
+    args = options.args ?? [];
+  } else if (isScript) {
+    // Script mode: run command via shell
+    command = "/bin/sh";
+    args = ["-c", jobConfig.command!];
+  } else {
+    // Claude mode (default)
+    command = "claude";
+    args = [
       "-p",
       "--verbose",
       "--output-format", "stream-json",
       ...(jobConfig.skip_permissions ? ["--dangerously-skip-permissions"] : []),
       ...(jobConfig.model ? ["--model", jobConfig.model] : []),
-      jobConfig.prompt,
+      jobConfig.prompt!,
     ];
+  }
+
+  const isCustomCommand = isScript || options.command !== undefined || options.args !== undefined;
 
   const timeout = jobConfig.timeout ?? defaultTimeout;
 

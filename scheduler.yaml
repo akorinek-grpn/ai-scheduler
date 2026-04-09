@@ -13,42 +13,19 @@ jobs:
   # │  DAILY JOBS                                             │
   # └─────────────────────────────────────────────────────────┘
 
-  data-ops:
-    name: "Data Ops — GSC Analytics Pipelines"
-    schedule: "0 6 * * *"              # Every day at 6:00 AM
-    directory: /Users/akorinek/Programming/gsc-analytics
-    prompt: |
-      Run the daily data import scripts for the GSC Analytics dashboard:
-
-      1. Pingdom import:
-         node scripts/import-pingdom.mjs
-
-      2. CrUX backfill (watched URLs):
-         node scripts/backfill-watched-urls.mjs
-
-      3. If today is Monday (check with: date +%u), also run Lighthouse backfill:
-         node scripts/backfill-lighthouse.mjs
-
-      Run each script, capture both stdout and stderr, check exit codes.
-      If any script fails with auth errors (401, 403, missing API tokens), report it prominently.
-    model: sonnet
-    skip_permissions: true
-    timeout: 900
-    enabled: true
-    tags: [daily, gsc-analytics, data]
-
   daily-ops:
     name: "Daily Ops — Briefing & Summary"
     schedule: "0 7 * * 1-5"           # Weekdays at 7:00 AM
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
-    prompt: |
-      Run the daily executive workflow in order:
-      1. Morning briefing: bun run briefing
-      2. Daily summary: bun run summarize --today
-      3. Action item assessment: bun run assess-actions
-      Run each command, capture output, and report results. If any command fails, report the error but continue with the remaining commands.
-    model: sonnet
-    skip_permissions: true
+    type: script
+    command: |
+      echo "=== Morning briefing ==="
+      bun run briefing || echo "FAILED: briefing"
+      echo "=== Daily summary ==="
+      bun run summarize --today || echo "FAILED: summarize"
+      echo "=== Action items ==="
+      bun run assess-actions || echo "FAILED: assess-actions"
+      echo "=== Done ==="
     timeout: 3600
     enabled: true
     tags: [daily, personalized-helper]
@@ -74,16 +51,13 @@ jobs:
     name: "Market Research Pipeline"
     schedule: "0 9 * * 1,4"           # Monday & Thursday at 9:00 AM
     directory: /Users/akorinek/Programming/market-researcher
-    prompt: |
-      Run the market research CLI pipeline:
-        npm run cli
-
-      After completion, verify outputs:
-      - Check reports/ directory for generated HTML/JSON files with non-zero sizes
-      - Check .data/ directory for markfiles
-      Report what was generated and any errors encountered.
-    model: sonnet
-    skip_permissions: true
+    type: script
+    command: |
+      set -e
+      npm run cli
+      echo "=== Output verification ==="
+      echo "Reports:" && ls -lh reports/*.{html,json} 2>/dev/null || echo "(none)"
+      echo "Markfiles:" && ls -lh .data/ 2>/dev/null || echo "(none)"
     timeout: 1800
     enabled: true
     tags: [twice-weekly, market-researcher]
@@ -121,14 +95,15 @@ jobs:
     name: "Weekly Ops — Summary & Reports"
     schedule: "0 7 * * 1"             # Monday at 7:00 AM
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
-    prompt: |
-      Run the weekly executive workflow:
-      1. Weekly summary: bun run summarize --week
-      2. 5/15 report generation: bun run generate-515
-      3. Compliance check: bun run compliance --fresh
-      Run each command in order, capture output, and report results.
-    model: sonnet
-    skip_permissions: true
+    type: script
+    command: |
+      echo "=== Weekly summary ==="
+      bun run summarize --week
+      echo "=== 5/15 report ==="
+      bun run generate-515
+      echo "=== Compliance check ==="
+      bun run compliance --fresh
+      echo "=== Done ==="
     timeout: 600
     enabled: true
     tags: [weekly, personalized-helper]
@@ -174,24 +149,83 @@ jobs:
     schedule: "30 17 * * 1-5"            # Weekdays at 5:30 PM
     directory: /Users/akorinek/Programming/ai-scheduler
     prompt: |
-      Generate an autonomous end-of-day update. This runs unattended — do not ask for input.
-
-      1. Gather today's git activity across key repos:
-         - cd /Users/akorinek/Programming/ai-scheduler && git log --oneline --since="today 00:00" --author="$(git config user.name)" 2>/dev/null
-         - Check for open/merged PRs: gh pr list --author="@me" --state=open 2>/dev/null; gh pr list --author="@me" --state=merged --search="merged:$(date +%Y-%m-%d)" 2>/dev/null
-
-      2. Check today's scheduler run results in data/runs/ for context on what ran.
-
-      3. Format a concise EOD summary with:
-         - What was done (commits, PRs, completed tasks)
-         - Any blockers or items carrying over
-         - Keep it under a 10-second read
-
-      4. Save the EOD report to data/eod-$(date +%Y-%m-%d).md
-
-      5. Touch ~/.claude/eod-$(date +%Y-%m-%d) to mark EOD as done for today.
+      Read the skill file at ~/.claude/skills/daily-reporting/SKILL.md and follow it exactly.
+      Run in autonomous mode (--auto): skip all interactive prompts, infer from git activity, and post directly.
     model: sonnet
     skip_permissions: true
     timeout: 300
     enabled: true
     tags: [daily, eod, reporting]
+
+  ai-researcher:
+    name: "AI Researcher — Run Analysis & Improvement Proposals"
+    schedule: "0 5 * * 0"             # Sunday at 5:00 AM
+    directory: /Users/akorinek/Programming/ai-scheduler
+    prompt: |
+      You are the AI Researcher agent for the ai-scheduler platform. Your job is to analyze
+      all recent run data and propose concrete improvements to both the scheduled jobs and
+      the skills they invoke.
+
+      ## Step 1 — Gather run data
+
+      Read scheduler.yaml to understand all configured jobs.
+      Then scan data/runs/ for every job. For each job directory:
+        - List all run directories (skip "latest" symlinks)
+        - Read status.json and meta.json from each run
+        - Read eval.json if present (contains AI evaluation of the run)
+        - Sample the output.log from the most recent 3 runs (first 100 + last 100 lines each)
+
+      ## Step 2 — Compute metrics
+
+      For each job, calculate:
+        - Total runs in the last 7 days
+        - Success rate (success / total)
+        - Average duration (finishedAt - startedAt)
+        - Failure patterns: group failures by exit code or error message
+        - Timeout rate
+        - Runs with follow-up needed (from eval.json)
+
+      ## Step 3 — Analyze patterns
+
+      Look for:
+        - Jobs with success rate below 80% — what's going wrong?
+        - Jobs that consistently timeout — should the timeout be increased, or is the task too broad?
+        - Jobs where the output log shows the AI going off-track (not following the skill, doing unnecessary work)
+        - Script jobs that could benefit from better error handling
+        - Claude jobs that would be better as scripts (just running commands, no AI reasoning needed)
+        - Claude jobs where the prompt is too vague or the skill reference isn't being followed
+        - Recurring errors across multiple jobs (e.g., auth issues, missing dependencies, network failures)
+
+      ## Step 4 — Propose improvements
+
+      For each finding, write a concrete proposal:
+
+        ### [Job ID]: [Brief issue title]
+        **Severity:** low | medium | high | critical
+        **Category:** prompt-quality | skill-gap | timeout | error-handling | type-mismatch | config
+        **Current behavior:** [what's happening]
+        **Proposed change:** [specific fix — include the exact config/prompt/skill change]
+        **Expected impact:** [what improves]
+
+      ## Step 5 — Check skills
+
+      For any claude job that references a skill file:
+        - Read the skill file
+        - Compare what the skill says to do vs. what the run logs show actually happened
+        - Flag gaps where the skill instructions are being ignored or misinterpreted
+        - Propose skill edits if the instructions are ambiguous
+
+      ## Step 6 — Write report
+
+      Save findings to data/research/YYYY-MM-DD-analysis.md with:
+        - Executive summary (3-5 bullet points)
+        - Metrics table (job, runs, success rate, avg duration)
+        - Detailed findings with proposals
+        - A prioritized action list (what to fix first)
+
+      Do NOT make any changes to code, config, or skills. Report only.
+    model: sonnet
+    skip_permissions: true
+    timeout: 600
+    enabled: true
+    tags: [weekly, meta, research]

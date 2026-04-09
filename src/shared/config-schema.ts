@@ -4,14 +4,25 @@ const jobSchema = z.object({
   name: z.string(),
   schedule: z.string(),
   directory: z.string(),
-  prompt: z.string(),
+  type: z.enum(["claude", "script"]).default("claude"),
+  prompt: z.string().optional(),
+  command: z.string().optional(),
   enabled: z.boolean().default(true),
   model: z.string().optional(),
   timeout: z.number().positive().optional(),
   max_retries: z.number().int().min(0).optional(),
   skip_permissions: z.boolean().default(false),
   tags: z.array(z.string()).default([]),
-});
+}).refine(
+  (job) => {
+    if (job.type === "claude") return !!job.prompt;
+    if (job.type === "script") return !!job.command;
+    return true;
+  },
+  {
+    message: "Claude jobs require 'prompt', script jobs require 'command'",
+  },
+);
 
 const defaultsSchema = z.object({
   timeout: z.number().positive().default(300),

@@ -12,7 +12,9 @@ export interface JobResponse {
   name: string;
   schedule: string;
   directory: string;
-  prompt: string;
+  type: "claude" | "script";
+  prompt?: string;
+  command?: string;
   enabled: boolean;
   model?: string;
   timeout?: number;
