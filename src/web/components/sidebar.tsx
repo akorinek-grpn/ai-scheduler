@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getHealth, type HealthResponse } from "@/lib/api-client";
+import { useNotificationContext } from "@/components/notification-provider";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: "grid" },
@@ -24,6 +25,7 @@ const icons: Record<string, string> = {
 export function Sidebar(): React.ReactElement {
   const pathname = usePathname();
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const { permission, requestPermission } = useNotificationContext();
 
   useEffect(() => {
     const fetchHealth = () => {
@@ -76,7 +78,36 @@ export function Sidebar(): React.ReactElement {
         })}
       </nav>
 
-      <div className="border-t border-border pt-3">
+      <div className="space-y-2 border-t border-border pt-3">
+        {/* Notification toggle */}
+        <button
+          onClick={permission === "default" ? requestPermission : undefined}
+          className="flex items-center gap-2 px-3 py-1 w-full text-left rounded-md hover:bg-secondary/50 transition-colors"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={permission === "granted" ? "text-foreground" : "text-zinc-600"}
+          >
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
+            {permission === "denied" && <path d="M1 1l22 22" />}
+          </svg>
+          <span className="text-xs text-muted-foreground">
+            {permission === "granted"
+              ? "Notifications on"
+              : permission === "denied"
+                ? "Notifications blocked"
+                : "Enable notifications"}
+          </span>
+        </button>
+
+        {/* Daemon status */}
         <div className="flex items-center gap-2 px-3 py-1">
           <div
             className={`h-2 w-2 rounded-full ${
