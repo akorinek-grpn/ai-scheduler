@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RunHistoryDots } from "@/components/run-history-dots";
 import type { JobResponse, RunResponse } from "@/lib/api-client";
-import { triggerJob } from "@/lib/api-client";
+import { triggerJob, setJobEnabled } from "@/lib/api-client";
 import { formatCronHuman } from "@/lib/format-cron";
 import { useState } from "react";
 
@@ -24,6 +24,7 @@ const severityStyles: Record<string, { text: string; bg: string; border: string;
 
 export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.ReactElement {
   const [isTriggering, setIsTriggering] = useState(false);
+  const [isToggling, setIsToggling] = useState(false);
 
   const handleTrigger = async () => {
     setIsTriggering(true);
@@ -34,6 +35,18 @@ export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.Rea
       console.error("Failed to trigger job:", err);
     } finally {
       setIsTriggering(false);
+    }
+  };
+
+  const handleToggle = async () => {
+    setIsToggling(true);
+    try {
+      await setJobEnabled(job.id, !job.enabled);
+      onTrigger();
+    } catch (err) {
+      console.error("Failed to toggle job:", err);
+    } finally {
+      setIsToggling(false);
     }
   };
 
@@ -110,13 +123,22 @@ export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.Rea
           </div>
         )}
 
-        {/* Footer with success rate and trigger */}
+        {/* Footer with toggle, run, and success rate */}
         <div className="flex items-center gap-2 border-t border-border pt-3">
+          <Button
+            variant="outline"
+            size="sm"
+            className={`text-xs ${job.enabled ? "text-muted-foreground" : "text-green-400"}`}
+            onClick={handleToggle}
+            disabled={isToggling || job.isActive}
+          >
+            {isToggling ? "..." : job.enabled ? "Disable" : "Enable"}
+          </Button>
           <Button
             size="sm"
             className="text-xs"
             onClick={handleTrigger}
-            disabled={isTriggering || job.isActive}
+            disabled={isTriggering || job.isActive || !job.enabled}
           >
             {isTriggering ? "Starting..." : "Run now"}
           </Button>

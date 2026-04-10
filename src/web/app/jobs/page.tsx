@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RunHistoryDots } from "@/components/run-history-dots";
-import { getJobs, getRuns, triggerJob, type JobResponse, type RunResponse } from "@/lib/api-client";
+import { getJobs, getRuns, triggerJob, setJobEnabled, type JobResponse, type RunResponse } from "@/lib/api-client";
 import { formatCronHuman } from "@/lib/format-cron";
 
 const severityStyles: Record<string, string> = {
@@ -26,6 +26,7 @@ export default function JobsPage(): React.ReactElement {
   const [jobs, setJobs] = useState<JobResponse[]>([]);
   const [runs, setRuns] = useState<RunResponse[]>([]);
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
@@ -45,6 +46,18 @@ export default function JobsPage(): React.ReactElement {
 
   const allTags = [...new Set(jobs.flatMap((j) => j.tags))].sort();
   const filteredJobs = tagFilter ? jobs.filter((j) => j.tags.includes(tagFilter)) : jobs;
+
+  const handleToggle = async (jobId: string, currentlyEnabled: boolean) => {
+    setTogglingId(jobId);
+    try {
+      await setJobEnabled(jobId, !currentlyEnabled);
+      fetchAll();
+    } catch (err) {
+      console.error("Toggle failed:", err);
+    } finally {
+      setTogglingId(null);
+    }
+  };
 
   const handleTrigger = async (jobId: string) => {
     setTriggeringId(jobId);
@@ -177,9 +190,18 @@ export default function JobsPage(): React.ReactElement {
                       </span>
                     )}
                     <Button
+                      variant="outline"
+                      size="sm"
+                      className={job.enabled ? "text-muted-foreground" : "text-green-400"}
+                      onClick={() => handleToggle(job.id, job.enabled)}
+                      disabled={togglingId === job.id || job.isActive}
+                    >
+                      {togglingId === job.id ? "..." : job.enabled ? "Disable" : "Enable"}
+                    </Button>
+                    <Button
                       size="sm"
                       onClick={() => handleTrigger(job.id)}
-                      disabled={triggeringId === job.id || job.isActive}
+                      disabled={triggeringId === job.id || job.isActive || !job.enabled}
                     >
                       {triggeringId === job.id ? "Starting..." : "Run now"}
                     </Button>

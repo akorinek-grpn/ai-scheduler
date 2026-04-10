@@ -1,6 +1,7 @@
 import express from "express";
 import fs from "fs";
 import path from "path";
+import yaml from "js-yaml";
 import { CronEngine } from "./cron-engine";
 import { loadConfig } from "./config";
 import { getRunsDir, getLogPath, getStatusPath, getMetaPath, getEvalPath } from "@shared/paths";
@@ -138,6 +139,45 @@ export function createApp(engine: CronEngine, projectRoot: string, startedAt: st
         done: isDone,
       });
     });
+  });
+
+  app.patch("/api/jobs/:jobId", (req, res) => {
+    const { jobId } = req.params;
+    const { enabled } = req.body as { enabled?: boolean };
+
+    if (typeof enabled !== "boolean") {
+      res.status(400).json({ error: "Request body must include { enabled: boolean }" });
+      return;
+    }
+
+    // Read raw YAML, update the enabled field, write back
+    let raw: string;
+    try {
+      raw = fs.readFileSync(configPath, "utf-8");
+    } catch (err) {
+      res.status(500).json({ error: `Failed to read config: ${(err as Error).message}` });
+      return;
+    }
+
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    const jobs = parsed?.jobs as Record<string, Record<string, unknown>> | undefined;
+
+    if (!jobs?.[jobId]) {
+      res.status(404).json({ error: `Job '${jobId}' not found` });
+      return;
+    }
+
+    jobs[jobId].enabled = enabled;
+
+    try {
+      fs.writeFileSync(configPath, yaml.dump(parsed, { lineWidth: -1, noRefs: true }), "utf-8");
+    } catch (err) {
+      res.status(500).json({ error: `Failed to write config: ${(err as Error).message}` });
+      return;
+    }
+
+    console.log(`[daemon] Job '${jobId}' ${enabled ? "enabled" : "disabled"} via API`);
+    res.json({ ok: true, jobId, enabled });
   });
 
   app.post("/api/reload", (_req, res) => {

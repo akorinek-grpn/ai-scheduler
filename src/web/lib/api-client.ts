@@ -82,3 +82,11 @@ export function getRunLog(jobId: string, runId: string, offset: number): Promise
 export function triggerJob(jobId: string): Promise<{ runId: string }> {
   return fetchApi(`/runs/${jobId}/trigger`, { method: "POST" });
 }
+
+export function setJobEnabled(jobId: string, enabled: boolean): Promise<{ ok: boolean; jobId: string; enabled: boolean }> {
+  return fetchApi(`/jobs/${jobId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+}
