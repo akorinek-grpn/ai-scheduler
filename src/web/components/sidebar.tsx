@@ -7,6 +7,7 @@ import { getHealth, type HealthResponse } from "@/lib/api-client";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: "grid" },
+  { href: "/timeline", label: "Timeline", icon: "timeline" },
   { href: "/jobs", label: "Jobs", icon: "list" },
   { href: "/runs", label: "Run History", icon: "clock" },
   { href: "/config", label: "Config", icon: "file" },
@@ -14,6 +15,7 @@ const navItems = [
 
 const icons: Record<string, string> = {
   grid: "M3 3h7v7H3V3zm11 0h7v7h-7V3zm-11 11h7v7H3v-7zm11 0h7v7h-7v-7z",
+  timeline: "M3 6h18M3 6v12M21 6v12M3 18h18M8 6v12M13 6v12M18 6v12",
   list: "M3 4h18M3 8h18M3 12h14M3 16h10",
   clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 4v6l4 2",
   file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-2 1v5h5",
