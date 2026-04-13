@@ -20,12 +20,22 @@ const DAY_SHORT: Record<string, string> = {
   "7": "Sun",
 };
 
-function formatTime(hour: string, min: string): string {
-  const h = parseInt(hour);
+function formatSingleTime(hour: number, min: string): string {
   const m = min.padStart(2, "0");
-  const ampm = h >= 12 ? "PM" : "AM";
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  const ampm = hour >= 12 ? "PM" : "AM";
+  const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
   return `${h12}:${m} ${ampm}`;
+}
+
+function formatTimes(hour: string, min: string): string {
+  // Handle comma-separated hours: "16,19,22" → "4:00 PM, 7:00 PM & 10:00 PM"
+  if (hour.includes(",")) {
+    const hours = hour.split(",").map((h) => formatSingleTime(parseInt(h.trim()), min));
+    if (hours.length === 2) return `${hours[0]} & ${hours[1]}`;
+    return hours.slice(0, -1).join(", ") + " & " + hours[hours.length - 1];
+  }
+
+  return formatSingleTime(parseInt(hour), min);
 }
 
 function formatDays(dow: string): string {
@@ -56,17 +66,19 @@ export function formatCronHuman(cron: string): string {
 
   const [min, hour, dom, mon, dow] = parts;
 
-  // Every N minutes
+  // Every N minutes (with optional day qualifier)
   if (min.startsWith("*/") && hour === "*") {
-    return `Every ${min.slice(2)} min`;
+    const suffix = dow !== "*" ? `, ${formatDays(dow).toLowerCase()}` : "";
+    return `Every ${min.slice(2)} min${suffix}`;
   }
 
-  // Every N hours
+  // Every N hours (with optional day qualifier)
   if (min === "0" && hour.startsWith("*/")) {
-    return `Every ${hour.slice(2)} hours`;
+    const suffix = dow !== "*" ? `, ${formatDays(dow).toLowerCase()}` : "";
+    return `Every ${hour.slice(2)} hours${suffix}`;
   }
 
-  const time = formatTime(hour, min);
+  const time = formatTimes(hour, min);
   const days = formatDays(dow);
 
   // Specific day of month
