@@ -1,21 +1,12 @@
-# AI Scheduler Configuration
-# All times are in local system timezone (CEST / UTC+2)
-
 version: 1
-
 defaults:
   timeout: 600
   max_retries: 0
   retain_runs: 30
-
 jobs:
-  # ┌─────────────────────────────────────────────────────────┐
-  # │  DAILY JOBS                                             │
-  # └─────────────────────────────────────────────────────────┘
-
   daily-ops:
-    name: "Daily Ops — Briefing & Summary"
-    schedule: "0 7 * * 1-5"           # Weekdays at 7:00 AM
+    name: Daily Ops — Briefing & Summary
+    schedule: 0 7 * * 1-5
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
@@ -28,11 +19,26 @@ jobs:
       echo "=== Done ==="
     timeout: 3600
     enabled: true
-    tags: [daily, personalized-helper]
-
+    tags:
+      - daily
+      - personalized-helper
+  afternoon-sync:
+    name: Afternoon Sync — Refresh Meetings
+    schedule: 0 15 * * 1-5
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    type: script
+    command: |
+      echo "=== Afternoon meeting sync ==="
+      bun run summarize --today || echo "FAILED: summarize"
+      echo "=== Done ==="
+    timeout: 600
+    enabled: true
+    tags:
+      - daily
+      - personalized-helper
   meeting-prep:
-    name: "Meeting Prep"
-    schedule: "0 8 * * 1-5"           # Weekdays at 8:00 AM
+    name: Meeting Prep
+    schedule: 0 8 * * 1-5
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     prompt: |
       Check today's calendar for upcoming meetings, then run the relevant prep scripts:
@@ -45,11 +51,35 @@ jobs:
     skip_permissions: true
     timeout: 600
     enabled: true
-    tags: [daily, personalized-helper, meetings]
-
+    tags:
+      - daily
+      - personalized-helper
+      - meetings
+  data-ops:
+    name: Data Ops — GSC Analytics Pipelines
+    schedule: 0 6 * * *
+    directory: /Users/akorinek/Programming/gsc-analytics
+    type: script
+    command: |
+      set -e
+      echo "=== Pingdom import ==="
+      node scripts/import-pingdom.mjs
+      echo "=== CrUX backfill ==="
+      node scripts/backfill-watched-urls.mjs
+      if [ "$(date +%u)" = "1" ]; then
+        echo "=== Lighthouse backfill (Monday) ==="
+        node scripts/backfill-lighthouse.mjs
+      fi
+      echo "=== Done ==="
+    timeout: 3600
+    enabled: true
+    tags:
+      - daily
+      - gsc-analytics
+      - data
   market-researcher:
-    name: "Market Research Pipeline"
-    schedule: "0 9 * * 1,4"           # Monday & Thursday at 9:00 AM
+    name: Market Research Pipeline
+    schedule: 0 9 * * 1,4
     directory: /Users/akorinek/Programming/market-researcher
     type: script
     command: |
@@ -60,11 +90,12 @@ jobs:
       echo "Markfiles:" && ls -lh .data/ 2>/dev/null || echo "(none)"
     timeout: 1800
     enabled: true
-    tags: [twice-weekly, market-researcher]
-
+    tags:
+      - twice-weekly
+      - market-researcher
   executive-review:
-    name: "Executive Review — Daily Summary"
-    schedule: "0 18 * * 1-5"          # Weekdays at 6:00 PM
+    name: Executive Review — Daily Summary
+    schedule: 0 18 * * 1-5
     directory: /Users/akorinek/Programming/ai-scheduler
     prompt: |
       You are the executive review agent. Review today's scheduled run results and write a summary.
@@ -85,32 +116,74 @@ jobs:
     skip_permissions: true
     timeout: 300
     enabled: true
-    tags: [daily, meta, review]
-
-  # ┌─────────────────────────────────────────────────────────┐
-  # │  WEEKLY JOBS                                            │
-  # └─────────────────────────────────────────────────────────┘
-
+    tags:
+      - daily
+      - meta
+      - review
   weekly-ops:
-    name: "Weekly Ops — Summary & Reports"
-    schedule: "0 7 * * 1"             # Monday at 7:00 AM
+    name: Weekly Ops — Summary & Reports
+    schedule: 0 7 * * 1
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
       echo "=== Weekly summary ==="
       bun run summarize --week
-      echo "=== 5/15 report ==="
-      bun run generate-515
-      echo "=== Compliance check ==="
+      echo "=== Compliance check (previous week) ==="
       bun run compliance --fresh
       echo "=== Done ==="
     timeout: 600
     enabled: true
-    tags: [weekly, personalized-helper]
-
+    tags:
+      - weekly
+      - personalized-helper
+  thursday-515:
+    name: My 5/15 Draft — Thursday Afternoon
+    schedule: 0 16 * * 4
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    type: script
+    command: |
+      echo "=== Generating 5/15 draft ==="
+      bun run compliance --fresh --with-my-515
+      echo "=== Done ==="
+    timeout: 900
+    enabled: true
+    tags:
+      - weekly
+      - personalized-helper
+      - five-fifteen
+  friday-compliance:
+    name: Compliance Check — Friday Evening
+    schedule: 0 16,19,22 * * 5
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    type: script
+    command: |
+      echo "=== Team compliance check ==="
+      bun run compliance --fresh
+      echo "=== Done ==="
+    timeout: 900
+    enabled: true
+    tags:
+      - weekly
+      - personalized-helper
+      - compliance
+  weekend-compliance:
+    name: Compliance Check — Weekend Catch-up
+    schedule: 0 10,18 * * 6,0
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    type: script
+    command: |
+      echo "=== Team compliance check (weekend catch-up) ==="
+      bun run compliance --fresh
+      echo "=== Done ==="
+    timeout: 900
+    enabled: true
+    tags:
+      - weekly
+      - personalized-helper
+      - compliance
   skill-healer:
-    name: "Skill Healer — Weekly Improvement"
-    schedule: "0 3 * * 0"             # Sunday at 3:00 AM
+    name: Skill Healer — Weekly Improvement
+    schedule: 0 3 * * 0
     directory: /Users/akorinek/Programming
     prompt: |
       Process accumulated session signals and improve Claude Code skills:
@@ -124,29 +197,13 @@ jobs:
     skip_permissions: true
     timeout: 600
     enabled: true
-    tags: [weekly, skills, meta]
-
-  codebase-maintainer:
-    name: "Codebase Maintainer — Personalized Helper"
-    schedule: "0 4 * * 6"             # Saturday at 4:00 AM
-    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
-    prompt: |
-      Maintain the personalized-helper codebase:
-      1. Sync CLAUDE.md: bun run sync-claude-md
-      2. Run tests: bun test
-      3. Check for outdated dependencies: bun outdated (or npm outdated)
-      4. Review scripts and lib code for potential improvements
-      Report test results, any dependency issues, and improvement suggestions.
-      Do NOT make code changes — just report findings.
-    model: sonnet
-    skip_permissions: true
-    timeout: 1800
-    enabled: true
-    tags: [weekly, personalized-helper, maintenance]
-
+    tags:
+      - weekly
+      - skills
+      - meta
   eod-report:
-    name: "EOD Report — End of Day Update"
-    schedule: "30 17 * * 1-5"            # Weekdays at 5:30 PM
+    name: EOD Report — End of Day Update
+    schedule: 0 18 * * 1-5
     directory: /Users/akorinek/Programming/ai-scheduler
     prompt: |
       Read the skill file at ~/.claude/skills/daily-reporting/SKILL.md and follow it exactly.
@@ -155,11 +212,89 @@ jobs:
     skip_permissions: true
     timeout: 300
     enabled: true
-    tags: [daily, eod, reporting]
+    tags:
+      - daily
+      - eod
+      - reporting
+  babysit-prs:
+    name: Babysit PRs — Auto-Review Open PRs
+    schedule: 0 6,8,10,12,14,16,18,20,22 * * 1-5
+    directory: /Users/akorinek/Programming/ai-scheduler
+    prompt: |
+      Review open PRs on configured repos. For each PR that needs review,
+      read and follow ~/.claude/skills/pr-review/SKILL.md exactly.
 
+      ## Repos to check
+      - groupon/echelon (github.com) — all open PRs
+      - Mobile-Next/next-pwa-app (github.groupondev.com) — only PRs with label "SEO"
+
+      ## For each repo above:
+      1. List open, non-draft PRs:
+         - For github.com repos:
+           ```
+           gh pr list --repo <repo> --state open --json number,title,author,createdAt,isDraft,labels --limit 10
+           ```
+         - For GHE repos (github.groupondev.com):
+           ```
+           GH_HOST=github.groupondev.com gh pr list --repo <repo> --state open --json number,title,author,createdAt,isDraft,labels --limit 10
+           ```
+      2. Filter out drafts and PRs authored by akorinek-grpn (don't self-review).
+      3. If the repo has a label filter (e.g., "SEO"), additionally filter to only PRs that have that label.
+      4. For each remaining PR (oldest first), decide whether to review:
+         a. Get my reviews on this PR:
+            ```
+            gh api repos/<repo>/pulls/<number>/reviews --jq '[.[] | select(.user.login == "akorinek-grpn")] | sort_by(.submitted_at) | last | {commit_id, submitted_at, state}'
+            ```
+         b. Get the current HEAD SHA:
+            ```
+            gh pr view <number> --repo <repo> --json headRefOid --jq '.headRefOid'
+            ```
+         c. Decision:
+            - **No prior review** → review this PR
+            - **Prior review exists AND head SHA == review commit_id** → skip (already reviewed, no new commits)
+            - **Prior review exists AND head SHA != review commit_id** → re-review (new commits since last review)
+         For GHE repos, prefix all gh commands with GH_HOST=github.groupondev.com.
+      5. For PRs that need review:
+         a. Read ~/.claude/skills/pr-review/SKILL.md
+         b. Follow ALL steps in that skill file with --auto flag behavior:
+            - Steps 1-6: fetch PR, filter files, understand intent, deep review, build findings
+            - Step 7: generate the review summary with verdict
+            - Step 8: POST THE REVIEW VIA gh api WITH INLINE COMMENTS — this is critical:
+              * Get the HEAD SHA: `gh pr view <N> --json headRefOid --jq '.headRefOid'`
+              * Build a JSON payload with the review body + inline comments array
+              * Each inline comment has: path, line, side ("RIGHT"), body (with severity prefix)
+              * Submit via: `gh api repos/<repo>/pulls/<N>/reviews --method POST --input /tmp/pr-review-payload.json`
+              * Use GitHub's ```suggestion``` syntax for concrete fixes
+            - Auto-approve logic (--auto mode):
+              * 0 critical + 0 important findings → event: "APPROVE"
+              * 0 critical + 1+ important → event: "COMMENT"
+              * 1+ critical → event: "REQUEST_CHANGES"
+            - Re-review: if prior review exists, diff only new commits and don't duplicate prior comments
+      6. After processing all repos, print a summary:
+         - PRs reviewed (first time): [list with numbers and titles]
+         - PRs re-reviewed (new commits): [list]
+         - PRs skipped (up to date): [list]
+         - PRs skipped (draft/self-authored): [list]
+
+      ## Important
+      - ALWAYS post via gh api with inline comments — never just print the review to stdout
+      - ALWAYS use the approve/comment/request-changes logic based on finding severity
+      - If gh api fails (e.g., line not in diff hunk), fall back to: `gh pr review <N> --comment --body "FULL_REVIEW"`
+      - If a PR review fails entirely, log the error and continue to the next one
+      - If there are no PRs to review, just report "No unreviewed PRs found"
+    model: sonnet
+    skip_permissions: true
+    timeout: 900
+    enabled: true
+    tags:
+      - periodic
+      - pr-review
+      - echelon
+      - next-pwa-app
+      - seo
   ai-researcher:
-    name: "AI Researcher — Run Analysis & Improvement Proposals"
-    schedule: "0 5 * * 0"             # Sunday at 5:00 AM
+    name: AI Researcher — Run Analysis & Improvement Proposals
+    schedule: 0 5 * * 0
     directory: /Users/akorinek/Programming/ai-scheduler
     prompt: |
       You are the AI Researcher agent for the ai-scheduler platform. Your job is to analyze
@@ -228,4 +363,7 @@ jobs:
     skip_permissions: true
     timeout: 600
     enabled: true
-    tags: [weekly, meta, research]
+    tags:
+      - weekly
+      - meta
+      - research

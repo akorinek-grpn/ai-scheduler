@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, Fragment } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -16,6 +17,13 @@ import type { RunResponse, RunEvaluation } from "@/lib/api-client";
 interface RunsTableProps {
   runs: RunResponse[];
   limit?: number;
+  grouped?: boolean;
+}
+
+interface RunBatch {
+  label: string;
+  runs: RunResponse[];
+  statusCounts: Record<string, number>;
 }
 
 function StatusBadge({ status }: { status: RunResponse["status"] }): React.ReactElement {
@@ -113,8 +121,122 @@ function formatTime(iso: string): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-export function RunsTable({ runs, limit }: RunsTableProps): React.ReactElement {
+const BATCH_WINDOW_MS = 5 * 60 * 1000;
+
+function groupIntoBatches(runs: RunResponse[]): RunBatch[] {
+  if (runs.length === 0) return [];
+
+  const sorted = [...runs].sort(
+    (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+  );
+
+  const batches: RunBatch[] = [];
+  let currentRuns: RunResponse[] = [sorted[0]];
+  let batchAnchor = new Date(sorted[0].startedAt).getTime();
+
+  for (let i = 1; i < sorted.length; i++) {
+    const runTime = new Date(sorted[i].startedAt).getTime();
+    if (batchAnchor - runTime <= BATCH_WINDOW_MS) {
+      currentRuns.push(sorted[i]);
+    } else {
+      batches.push(makeBatch(currentRuns, batchAnchor));
+      currentRuns = [sorted[i]];
+      batchAnchor = runTime;
+    }
+  }
+  batches.push(makeBatch(currentRuns, batchAnchor));
+
+  return batches;
+}
+
+function makeBatch(runs: RunResponse[], anchorTime: number): RunBatch {
+  const date = new Date(anchorTime);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
+  const time = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  let dayLabel: string;
+  if (date.toDateString() === today.toDateString()) {
+    dayLabel = "Today";
+  } else if (date.toDateString() === yesterday.toDateString()) {
+    dayLabel = "Yesterday";
+  } else {
+    dayLabel = date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  }
+
+  const statusCounts: Record<string, number> = {};
+  for (const r of runs) {
+    statusCounts[r.status] = (statusCounts[r.status] ?? 0) + 1;
+  }
+
+  return {
+    label: `${dayLabel} at ${time}`,
+    runs,
+    statusCounts,
+  };
+}
+
+const statusDotColors: Record<string, string> = {
+  success: "bg-green-500",
+  failed: "bg-red-500",
+  timeout: "bg-orange-500",
+  running: "bg-yellow-500 animate-pulse",
+};
+
+function RunRow({ run }: { run: RunResponse }): React.ReactElement {
+  const rowBorder = run.evaluation
+    ? evalStyles[run.evaluation.severity]?.row ?? ""
+    : "";
+  return (
+    <TableRow
+      className={rowBorder ? `border-l-2 ${rowBorder}` : ""}
+    >
+      <TableCell>
+        <StatusBadge status={run.status} />
+      </TableCell>
+      <TableCell>
+        <div className="font-medium">{run.jobName}</div>
+        <div className="font-mono text-xs text-muted-foreground">
+          {run.directory.split("/").pop()}
+        </div>
+      </TableCell>
+      <TableCell>
+        {run.evaluation ? (
+          <EvalCell evaluation={run.evaluation} />
+        ) : run.status === "running" ? (
+          <span className="text-xs text-muted-foreground italic">evaluating after run...</span>
+        ) : null}
+      </TableCell>
+      <TableCell>
+        <Badge variant="outline" className="text-muted-foreground">
+          {run.trigger}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-sm text-muted-foreground">
+        {formatTime(run.startedAt)}
+      </TableCell>
+      <TableCell className="font-mono text-sm text-muted-foreground">
+        {formatDuration(run.startedAt, run.finishedAt)}
+      </TableCell>
+      <TableCell>
+        <Link href={`/runs/${run.jobId}/${run.runId}`}>
+          <Button variant="outline" size="sm" className="text-xs">
+            {run.status === "running" ? "Watch" : "Logs"}
+          </Button>
+        </Link>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+export function RunsTable({ runs, limit, grouped = false }: RunsTableProps): React.ReactElement {
   const displayRuns = limit ? runs.slice(0, limit) : runs;
+
+  const batches = useMemo(
+    () => (grouped ? groupIntoBatches(displayRuns) : []),
+    [displayRuns, grouped]
+  );
 
   return (
     <Table>
@@ -130,52 +252,40 @@ export function RunsTable({ runs, limit }: RunsTableProps): React.ReactElement {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {displayRuns.map((run) => {
-          const rowBorder = run.evaluation
-            ? evalStyles[run.evaluation.severity]?.row ?? ""
-            : "";
-          return (
-            <TableRow
-              key={`${run.jobId}-${run.runId}`}
-              className={rowBorder ? `border-l-2 ${rowBorder}` : ""}
-            >
-              <TableCell>
-                <StatusBadge status={run.status} />
-              </TableCell>
-              <TableCell>
-                <div className="font-medium">{run.jobName}</div>
-                <div className="font-mono text-xs text-muted-foreground">
-                  {run.directory.split("/").pop()}
-                </div>
-              </TableCell>
-              <TableCell>
-                {run.evaluation ? (
-                  <EvalCell evaluation={run.evaluation} />
-                ) : run.status === "running" ? (
-                  <span className="text-xs text-muted-foreground italic">evaluating after run...</span>
-                ) : null}
-              </TableCell>
-              <TableCell>
-                <Badge variant="outline" className="text-muted-foreground">
-                  {run.trigger}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-sm text-muted-foreground">
-                {formatTime(run.startedAt)}
-              </TableCell>
-              <TableCell className="font-mono text-sm text-muted-foreground">
-                {formatDuration(run.startedAt, run.finishedAt)}
-              </TableCell>
-              <TableCell>
-                <Link href={`/runs/${run.jobId}/${run.runId}`}>
-                  <Button variant="outline" size="sm" className="text-xs">
-                    {run.status === "running" ? "Watch" : "Logs"}
-                  </Button>
-                </Link>
-              </TableCell>
-            </TableRow>
-          );
-        })}
+        {grouped ? (
+          batches.map((batch, batchIdx) => (
+            <Fragment key={batch.label + batchIdx}>
+              {/* Batch divider row */}
+              <tr>
+                <td colSpan={7} className={batchIdx === 0 ? "pt-0 pb-0" : "pt-4 pb-0"}>
+                  <div className="flex items-center gap-3 py-1.5">
+                    <span className="text-xs font-semibold text-muted-foreground tracking-wide uppercase">
+                      {batch.label}
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      {["running", "failed", "timeout", "success"]
+                        .filter((s) => batch.statusCounts[s])
+                        .map((s) => (
+                          <span key={s} className="flex items-center gap-1">
+                            <span className={`inline-block h-1.5 w-1.5 rounded-full ${statusDotColors[s]}`} />
+                            <span className="text-[10px] text-muted-foreground/70">{batch.statusCounts[s]}</span>
+                          </span>
+                        ))}
+                    </span>
+                    <div className="flex-1 border-t border-border/50" />
+                  </div>
+                </td>
+              </tr>
+              {batch.runs.map((run) => (
+                <RunRow key={`${run.jobId}-${run.runId}`} run={run} />
+              ))}
+            </Fragment>
+          ))
+        ) : (
+          displayRuns.map((run) => (
+            <RunRow key={`${run.jobId}-${run.runId}`} run={run} />
+          ))
+        )}
         {displayRuns.length === 0 && (
           <TableRow>
             <TableCell colSpan={7} className="text-center text-muted-foreground py-8">

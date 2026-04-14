@@ -73,15 +73,20 @@ export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.Rea
   const lastEval = recentRuns.find((r) => r.evaluation)?.evaluation;
 
   return (
-    <Card className={!job.enabled ? "opacity-50" : ""}>
+    <Card className={!job.enabled ? "opacity-60 border-dashed" : ""}>
       <CardContent className="pt-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-semibold truncate pr-2">{job.name}</span>
           <div className="flex items-center gap-2 shrink-0">
+            {!job.enabled && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-zinc-500 border-zinc-600">
+                disabled
+              </Badge>
+            )}
             {lastRunStatus === "running" && (
               <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
             )}
-            <div className={`h-2 w-2 rounded-full ${statusColor}`} />
+            <div className={`h-2 w-2 rounded-full ${job.enabled ? statusColor : "bg-zinc-600"}`} />
           </div>
         </div>
 
@@ -90,7 +95,6 @@ export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.Rea
         </div>
         <div className="text-xs text-muted-foreground mb-3">
           {formatCronHuman(job.schedule)}
-          {!job.enabled && " · disabled"}
           {job.model && ` · ${job.model}`}
         </div>
 
@@ -126,9 +130,9 @@ export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.Rea
         {/* Footer with toggle, run, and success rate */}
         <div className="flex items-center gap-2 border-t border-border pt-3">
           <Button
-            variant="outline"
+            variant={job.enabled ? "outline" : "default"}
             size="sm"
-            className={`text-xs ${job.enabled ? "text-muted-foreground" : "text-green-400"}`}
+            className={`text-xs ${job.enabled ? "text-muted-foreground hover:text-red-400 hover:border-red-400/50" : "bg-green-600 hover:bg-green-500 text-white"}`}
             onClick={handleToggle}
             disabled={isToggling || job.isActive}
           >

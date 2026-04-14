@@ -83,7 +83,7 @@ export default function RunHistoryPage(): React.ReactElement {
 
       <Card>
         <CardContent className="pt-4">
-          <RunsTable runs={runs} />
+          <RunsTable runs={runs} grouped />
         </CardContent>
       </Card>
     </div>
