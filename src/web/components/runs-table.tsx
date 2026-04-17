@@ -2,16 +2,6 @@
 
 import { useMemo, Fragment } from "react";
 import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
 import type { RunResponse, RunEvaluation } from "@/lib/api-client";
 
 interface RunsTableProps {
@@ -24,102 +14,58 @@ interface RunBatch {
   label: string;
   runs: RunResponse[];
   statusCounts: Record<string, number>;
+  hasIssues: boolean;
 }
 
-function StatusBadge({ status }: { status: RunResponse["status"] }): React.ReactElement {
-  const variants: Record<string, { className: string; label: string }> = {
-    running: { className: "border-yellow-500/50 text-yellow-500", label: "running" },
-    success: { className: "border-green-500/50 text-green-500", label: "success" },
-    failed: { className: "border-red-500/50 text-red-500", label: "failed" },
-    timeout: { className: "border-orange-500/50 text-orange-500", label: "timeout" },
-  };
-  const v = variants[status] ?? variants.failed;
+// --- Status visuals ---
 
-  return (
-    <Badge variant="outline" className={v.className}>
-      {status === "running" && (
-        <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-yellow-500" />
-      )}
-      {status === "success" && <span className="mr-1">{"\u2713"}</span>}
-      {status === "failed" && <span className="mr-1">{"\u2717"}</span>}
-      {status === "timeout" && <span className="mr-1">{"\u23F1"}</span>}
-      {v.label}
-    </Badge>
-  );
-}
-
-const evalStyles: Record<string, { badge: string; row: string }> = {
-  ok: {
-    badge: "border-green-500/30 text-green-400 bg-green-500/5",
-    row: "border-l-green-500/40",
-  },
-  info: {
-    badge: "border-blue-500/30 text-blue-400 bg-blue-500/5",
-    row: "border-l-blue-500/40",
-  },
-  warning: {
-    badge: "border-amber-500/30 text-amber-400 bg-amber-500/5",
-    row: "border-l-amber-500/40",
-  },
-  critical: {
-    badge: "border-red-500/30 text-red-400 bg-red-500/5",
-    row: "border-l-red-500/40",
-  },
+const statusDot: Record<string, string> = {
+  running: "bg-yellow-500 animate-pulse",
+  success: "bg-green-500",
+  partial: "bg-amber-500",
+  failed: "bg-red-500",
+  timeout: "bg-orange-500",
 };
 
-function EvalCell({ evaluation }: { evaluation?: RunEvaluation }): React.ReactElement | null {
-  if (!evaluation) return null;
+const statusText: Record<string, string> = {
+  running: "text-yellow-500",
+  success: "text-green-500",
+  partial: "text-amber-500",
+  failed: "text-red-500",
+  timeout: "text-orange-500",
+};
 
-  const style = evalStyles[evaluation.severity] ?? evalStyles.info;
-  const icons: Record<string, string> = {
-    ok: "\u2713",
-    info: "\u2139",
-    warning: "\u26A0",
-    critical: "!!",
-  };
+const evalColor: Record<string, string> = {
+  ok: "text-muted-foreground",
+  info: "text-blue-500",
+  warning: "text-amber-500",
+  critical: "text-red-500",
+};
 
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-1.5">
-        <Badge variant="outline" className={`text-[10px] ${style.badge}`}>
-          {icons[evaluation.severity] ?? "?"} {evaluation.severity}
-        </Badge>
-        {evaluation.followUpNeeded && (
-          <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-400 bg-amber-500/5">
-            follow-up
-          </Badge>
-        )}
-      </div>
-      <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
-        {evaluation.summary}
-      </p>
-      {evaluation.followUpReason && (
-        <p className="text-[10px] text-muted-foreground/60 leading-relaxed line-clamp-1">
-          {evaluation.followUpReason}
-        </p>
-      )}
-    </div>
-  );
-}
+const evalIcon: Record<string, string> = {
+  ok: "\u2713",
+  info: "\u2139",
+  warning: "\u26A0",
+  critical: "!!",
+};
+
+// --- Formatting ---
 
 function formatDuration(startedAt: string, finishedAt: string | null): string {
   const start = new Date(startedAt).getTime();
   const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
   const seconds = Math.floor((end - start) / 1000);
+  if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  return `${minutes}m ${remainingSeconds}s`;
+  const rem = seconds % 60;
+  return `${minutes}m${rem > 0 ? ` ${rem}s` : ""}`;
 }
 
 function formatTime(iso: string): string {
-  const date = new Date(iso);
-  const today = new Date();
-  const isToday = date.toDateString() === today.toDateString();
-  if (isToday) {
-    return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  }
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
+
+// --- Batching ---
 
 const BATCH_WINDOW_MS = 5 * 60 * 1000;
 
@@ -132,20 +78,19 @@ function groupIntoBatches(runs: RunResponse[]): RunBatch[] {
 
   const batches: RunBatch[] = [];
   let currentRuns: RunResponse[] = [sorted[0]];
-  let batchAnchor = new Date(sorted[0].startedAt).getTime();
+  let anchor = new Date(sorted[0].startedAt).getTime();
 
   for (let i = 1; i < sorted.length; i++) {
-    const runTime = new Date(sorted[i].startedAt).getTime();
-    if (batchAnchor - runTime <= BATCH_WINDOW_MS) {
+    const t = new Date(sorted[i].startedAt).getTime();
+    if (anchor - t <= BATCH_WINDOW_MS) {
       currentRuns.push(sorted[i]);
     } else {
-      batches.push(makeBatch(currentRuns, batchAnchor));
+      batches.push(makeBatch(currentRuns, anchor));
       currentRuns = [sorted[i]];
-      batchAnchor = runTime;
+      anchor = t;
     }
   }
-  batches.push(makeBatch(currentRuns, batchAnchor));
-
+  batches.push(makeBatch(currentRuns, anchor));
   return batches;
 }
 
@@ -156,79 +101,82 @@ function makeBatch(runs: RunResponse[], anchorTime: number): RunBatch {
   yesterday.setDate(today.getDate() - 1);
 
   const time = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  let dayLabel: string;
-  if (date.toDateString() === today.toDateString()) {
-    dayLabel = "Today";
-  } else if (date.toDateString() === yesterday.toDateString()) {
-    dayLabel = "Yesterday";
-  } else {
-    dayLabel = date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-  }
+  let day: string;
+  if (date.toDateString() === today.toDateString()) day = "Today";
+  else if (date.toDateString() === yesterday.toDateString()) day = "Yesterday";
+  else day = date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 
   const statusCounts: Record<string, number> = {};
+  let hasIssues = false;
   for (const r of runs) {
     statusCounts[r.status] = (statusCounts[r.status] ?? 0) + 1;
+    if (r.status === "failed" || r.status === "timeout" || r.status === "partial") hasIssues = true;
+    if (r.evaluation?.severity === "critical" || r.evaluation?.severity === "warning") hasIssues = true;
   }
 
-  return {
-    label: `${dayLabel} at ${time}`,
-    runs,
-    statusCounts,
-  };
+  return { label: `${day} ${time}`, runs, statusCounts, hasIssues };
 }
 
-const statusDotColors: Record<string, string> = {
-  success: "bg-green-500",
-  failed: "bg-red-500",
-  timeout: "bg-orange-500",
-  running: "bg-yellow-500 animate-pulse",
-};
+// --- Run Row (single-line, compact) ---
 
 function RunRow({ run }: { run: RunResponse }): React.ReactElement {
-  const rowBorder = run.evaluation
-    ? evalStyles[run.evaluation.severity]?.row ?? ""
-    : "";
+  const ev = run.evaluation;
+  const isBad = run.status === "failed" || run.status === "timeout";
+  const isPartial = run.status === "partial";
+  const evIsBad = ev && (ev.severity === "critical" || ev.severity === "warning");
+
   return (
-    <TableRow
-      className={rowBorder ? `border-l-2 ${rowBorder}` : ""}
+    <Link
+      href={`/runs/${run.jobId}/${run.runId}`}
+      className={`
+        flex items-center gap-3 px-3 py-1.5 rounded transition-colors
+        hover:bg-secondary/60
+        ${isBad || evIsBad ? "bg-red-500/[0.03]" : isPartial ? "bg-amber-500/[0.04]" : ""}
+      `}
     >
-      <TableCell>
-        <StatusBadge status={run.status} />
-      </TableCell>
-      <TableCell>
-        <div className="font-medium">{run.jobName}</div>
-        <div className="font-mono text-xs text-muted-foreground">
-          {run.directory.split("/").pop()}
-        </div>
-      </TableCell>
-      <TableCell>
-        {run.evaluation ? (
-          <EvalCell evaluation={run.evaluation} />
+      {/* Status dot */}
+      <span className={`h-2 w-2 rounded-full shrink-0 ${statusDot[run.status] ?? "bg-muted-foreground/50"}`} />
+
+      {/* Job name */}
+      <span className={`text-[13px] w-[180px] truncate shrink-0 ${isBad || isPartial ? "font-medium" : ""} ${isBad ? "text-red-500" : isPartial ? "text-amber-500" : ""}`}>
+        {run.jobName}
+      </span>
+
+      {/* Eval one-liner */}
+      <span className="flex-1 min-w-0 truncate text-[12px]">
+        {ev ? (
+          <span className={evalColor[ev.severity] ?? "text-muted-foreground"}>
+            <span className="font-medium">{evalIcon[ev.severity]}</span>
+            {" "}
+            {ev.summary}
+            {ev.followUpNeeded && <span className="text-amber-500 ml-1">*</span>}
+          </span>
         ) : run.status === "running" ? (
-          <span className="text-xs text-muted-foreground italic">evaluating after run...</span>
-        ) : null}
-      </TableCell>
-      <TableCell>
-        <Badge variant="outline" className="text-muted-foreground">
-          {run.trigger}
-        </Badge>
-      </TableCell>
-      <TableCell className="text-sm text-muted-foreground">
-        {formatTime(run.startedAt)}
-      </TableCell>
-      <TableCell className="font-mono text-sm text-muted-foreground">
+          <span className="text-muted-foreground">running...</span>
+        ) : (
+          <span className="text-muted-foreground">{"\u2014"}</span>
+        )}
+      </span>
+
+      {/* Trigger */}
+      {run.trigger === "manual" && (
+        <span className="text-[10px] text-muted-foreground shrink-0">manual</span>
+      )}
+
+      {/* Duration */}
+      <span className="text-[12px] font-mono text-muted-foreground tabular-nums w-[52px] text-right shrink-0">
         {formatDuration(run.startedAt, run.finishedAt)}
-      </TableCell>
-      <TableCell>
-        <Link href={`/runs/${run.jobId}/${run.runId}`}>
-          <Button variant="outline" size="sm" className="text-xs">
-            {run.status === "running" ? "Watch" : "Logs"}
-          </Button>
-        </Link>
-      </TableCell>
-    </TableRow>
+      </span>
+
+      {/* Time */}
+      <span className="text-[12px] font-mono text-muted-foreground tabular-nums w-[72px] text-right shrink-0">
+        {formatTime(run.startedAt)}
+      </span>
+    </Link>
   );
 }
+
+// --- Main Component ---
 
 export function RunsTable({ runs, limit, grouped = false }: RunsTableProps): React.ReactElement {
   const displayRuns = limit ? runs.slice(0, limit) : runs;
@@ -238,62 +186,57 @@ export function RunsTable({ runs, limit, grouped = false }: RunsTableProps): Rea
     [displayRuns, grouped]
   );
 
+  if (displayRuns.length === 0) {
+    return (
+      <div className="text-center text-muted-foreground py-8 text-[13px]">
+        No runs yet
+      </div>
+    );
+  }
+
+  if (!grouped) {
+    return (
+      <div className="space-y-px">
+        {displayRuns.map((run) => (
+          <RunRow key={`${run.jobId}-${run.runId}`} run={run} />
+        ))}
+      </div>
+    );
+  }
+
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-[90px]">Status</TableHead>
-          <TableHead className="w-[140px]">Job</TableHead>
-          <TableHead>AI Evaluation</TableHead>
-          <TableHead className="w-[70px]">Trigger</TableHead>
-          <TableHead className="w-[120px]">Started</TableHead>
-          <TableHead className="w-[80px]">Duration</TableHead>
-          <TableHead className="w-[60px]" />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {grouped ? (
-          batches.map((batch, batchIdx) => (
-            <Fragment key={batch.label + batchIdx}>
-              {/* Batch divider row */}
-              <tr>
-                <td colSpan={7} className={batchIdx === 0 ? "pt-0 pb-0" : "pt-4 pb-0"}>
-                  <div className="flex items-center gap-3 py-1.5">
-                    <span className="text-xs font-semibold text-muted-foreground tracking-wide uppercase">
-                      {batch.label}
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      {["running", "failed", "timeout", "success"]
-                        .filter((s) => batch.statusCounts[s])
-                        .map((s) => (
-                          <span key={s} className="flex items-center gap-1">
-                            <span className={`inline-block h-1.5 w-1.5 rounded-full ${statusDotColors[s]}`} />
-                            <span className="text-[10px] text-muted-foreground/70">{batch.statusCounts[s]}</span>
-                          </span>
-                        ))}
-                    </span>
-                    <div className="flex-1 border-t border-border/50" />
-                  </div>
-                </td>
-              </tr>
-              {batch.runs.map((run) => (
-                <RunRow key={`${run.jobId}-${run.runId}`} run={run} />
-              ))}
-            </Fragment>
-          ))
-        ) : (
-          displayRuns.map((run) => (
-            <RunRow key={`${run.jobId}-${run.runId}`} run={run} />
-          ))
-        )}
-        {displayRuns.length === 0 && (
-          <TableRow>
-            <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-              No runs yet
-            </TableCell>
-          </TableRow>
-        )}
-      </TableBody>
-    </Table>
+    <div className="space-y-3">
+      {batches.map((batch, idx) => (
+        <div key={batch.label + idx}>
+          {/* Batch header */}
+          <div className="flex items-center gap-2 px-3 mb-0.5">
+            <span className="text-[11px] font-medium text-muted-foreground tabular-nums">
+              {batch.label}
+            </span>
+            <span className="flex items-center gap-1.5">
+              {(["failed", "timeout", "partial", "running", "success"] as const)
+                .filter((s) => batch.statusCounts[s])
+                .map((s) => (
+                  <span key={s} className="flex items-center gap-0.5">
+                    <span className={`h-1.5 w-1.5 rounded-full ${statusDot[s]}`} />
+                    <span className="text-[10px] text-muted-foreground tabular-nums">{batch.statusCounts[s]}</span>
+                  </span>
+                ))}
+            </span>
+            {batch.hasIssues && (
+              <span className="text-[10px] text-red-500">issues</span>
+            )}
+            <div className="flex-1 border-t border-border/50" />
+          </div>
+
+          {/* Runs */}
+          <div className="space-y-px">
+            {batch.runs.map((run) => (
+              <RunRow key={`${run.jobId}-${run.runId}`} run={run} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

@@ -82,6 +82,22 @@ describe("runJob", () => {
     expect(status.exitCode).toBe(1);
   });
 
+  it("marks partial run when exit code is 2", async () => {
+    const run = await runJob({
+      jobId: "test-job",
+      jobConfig: testJob,
+      projectRoot: tmpDir,
+      trigger: "manual",
+      command: "sh",
+      args: ["-c", "echo 'FAILED: step1'; exit 2"],
+    });
+
+    const runDir = path.join(tmpDir, "data", "runs", "test-job", run.runId);
+    const status = JSON.parse(fs.readFileSync(path.join(runDir, "status.json"), "utf-8"));
+    expect(status.status).toBe("partial");
+    expect(status.exitCode).toBe(2);
+  });
+
   it("creates latest symlink pointing to run dir", async () => {
     const run = await runJob({
       jobId: "test-job",

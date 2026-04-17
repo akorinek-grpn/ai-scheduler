@@ -10,15 +10,17 @@ interface ToastContainerProps {
 const statusStyles: Record<string, { bg: string; border: string; icon: string }> = {
   started: { bg: "bg-yellow-500/10", border: "border-yellow-500/30", icon: "\u25B6" },
   success: { bg: "bg-green-500/10", border: "border-green-500/30", icon: "\u2713" },
+  partial: { bg: "bg-amber-500/10", border: "border-amber-500/30", icon: "\u26A0" },
   failed: { bg: "bg-red-500/10", border: "border-red-500/30", icon: "\u2717" },
   timeout: { bg: "bg-orange-500/10", border: "border-orange-500/30", icon: "\u23F1" },
 };
 
 const statusText: Record<string, string> = {
-  started: "text-yellow-400",
-  success: "text-green-400",
-  failed: "text-red-400",
-  timeout: "text-orange-400",
+  started: "text-yellow-500",
+  success: "text-green-500",
+  partial: "text-amber-500",
+  failed: "text-red-500",
+  timeout: "text-orange-500",
 };
 
 export function ToastContainer({ toasts, onDismiss }: ToastContainerProps): React.ReactElement | null {

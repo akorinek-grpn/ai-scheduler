@@ -7,24 +7,17 @@ import { getHealth, type HealthResponse } from "@/lib/api-client";
 import { useNotificationContext } from "@/components/notification-provider";
 
 const navItems = [
-  { href: "/", label: "Dashboard", icon: "grid" },
-  { href: "/timeline", label: "Timeline", icon: "timeline" },
-  { href: "/jobs", label: "Jobs", icon: "list" },
-  { href: "/runs", label: "Run History", icon: "clock" },
-  { href: "/config", label: "Config", icon: "file" },
+  { href: "/", label: "Dashboard", key: "D" },
+  { href: "/timeline", label: "Timeline", key: "T" },
+  { href: "/jobs", label: "Jobs", key: "J" },
+  { href: "/runs", label: "Runs", key: "R" },
+  { href: "/config", label: "Config", key: "C" },
 ];
-
-const icons: Record<string, string> = {
-  grid: "M3 3h7v7H3V3zm11 0h7v7h-7V3zm-11 11h7v7H3v-7zm11 0h7v7h-7v-7z",
-  timeline: "M3 6h18M3 6v12M21 6v12M3 18h18M8 6v12M13 6v12M18 6v12",
-  list: "M3 4h18M3 8h18M3 12h14M3 16h10",
-  clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 4v6l4 2",
-  file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-2 1v5h5",
-};
 
 export function Sidebar(): React.ReactElement {
   const pathname = usePathname();
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
   const { permission, requestPermission } = useNotificationContext();
 
   useEffect(() => {
@@ -38,92 +31,99 @@ export function Sidebar(): React.ReactElement {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    setIsOpen(false);
+  }, [pathname]);
+
   return (
-    <aside className="flex h-screen w-56 flex-col border-r border-border bg-background px-3 py-4">
-      <div className="mb-6 flex items-center gap-2 px-3">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
-          AI
-        </div>
-        <span className="text-sm font-semibold">AI Scheduler</span>
-      </div>
+    <>
+      {/* Mobile menu button */}
+      <button
+        onClick={() => setIsOpen(true)}
+        className="fixed top-2 left-2 z-40 flex h-8 w-8 items-center justify-center rounded bg-secondary md:hidden"
+        aria-label="Open navigation"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+          <path d="M3 6h18M3 12h18M3 18h18" />
+        </svg>
+      </button>
 
-      <nav className="flex flex-1 flex-col gap-1">
-        {navItems.map((item) => {
-          const isActive = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                isActive
-                  ? "bg-secondary text-secondary-foreground font-medium"
-                  : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
-              }`}
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+      {/* Backdrop */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-background/60 backdrop-blur-sm md:hidden"
+          onClick={() => setIsOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside
+        className={`
+          fixed inset-y-0 left-0 z-50 flex h-screen w-48 flex-col border-r border-border bg-sidebar
+          transition-transform duration-150 ease-out
+          md:static md:translate-x-0
+          ${isOpen ? "translate-x-0" : "-translate-x-full"}
+        `}
+        role="navigation"
+        aria-label="Main navigation"
+      >
+        {/* Logo */}
+        <div className="flex items-center gap-2 px-3 py-3 border-b border-border">
+          <span className="font-mono text-[11px] font-bold tracking-tight text-primary">AI:SCHED</span>
+        </div>
+
+        {/* Nav */}
+        <nav className="flex flex-1 flex-col gap-px py-2 px-2">
+          {navItems.map((item) => {
+            const isActive = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={isActive ? "page" : undefined}
+                className={`flex items-center gap-2 rounded px-2.5 py-1.5 text-[13px] transition-colors ${
+                  isActive
+                    ? "bg-secondary text-foreground font-medium"
+                    : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+                }`}
               >
-                <path d={icons[item.icon]} />
-              </svg>
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
+                <span className="font-mono text-[10px] text-muted-foreground w-3">{item.key}</span>
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
 
-      <div className="space-y-2 border-t border-border pt-3">
-        {/* Notification toggle */}
-        <button
-          onClick={permission === "default" ? requestPermission : undefined}
-          className="flex items-center gap-2 px-3 py-1 w-full text-left rounded-md hover:bg-secondary/50 transition-colors"
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={permission === "granted" ? "text-foreground" : "text-zinc-600"}
+        {/* Status bar at bottom */}
+        <div className="border-t border-border px-3 py-2 space-y-1">
+          <button
+            onClick={permission === "default" ? requestPermission : undefined}
+            className="flex items-center gap-2 w-full text-left rounded px-1 py-0.5 hover:bg-secondary/60 transition-colors"
+            aria-label={
+              permission === "granted"
+                ? "Notifications enabled"
+                : permission === "denied"
+                  ? "Notifications blocked"
+                  : "Enable notifications"
+            }
           >
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
-            {permission === "denied" && <path d="M1 1l22 22" />}
-          </svg>
-          <span className="text-xs text-muted-foreground">
-            {permission === "granted"
-              ? "Notifications on"
-              : permission === "denied"
-                ? "Notifications blocked"
-                : "Enable notifications"}
-          </span>
-        </button>
+            <span className={`text-[10px] ${permission === "granted" ? "text-foreground" : "text-muted-foreground"}`}>
+              {permission === "granted" ? "\u266A" : permission === "denied" ? "\u2715" : "\u25CB"}
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              {permission === "granted" ? "Notifs on" : permission === "denied" ? "Blocked" : "Notifications"}
+            </span>
+          </button>
 
-        {/* Daemon status */}
-        <div className="flex items-center gap-2 px-3 py-1">
-          <div
-            className={`h-2 w-2 rounded-full ${
-              health ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.4)]" : "bg-zinc-500"
-            }`}
-          />
-          <span className="text-xs text-muted-foreground">
-            {health ? "Daemon running" : "Daemon offline"}
-          </span>
-        </div>
-        {health && (
-          <div className="px-3 text-xs text-zinc-600">
-            PID {health.pid}
+          <div className="flex items-center gap-2 px-1" role="status" aria-label={health ? "Daemon running" : "Daemon offline"}>
+            <div className={`h-1.5 w-1.5 rounded-full ${health ? "bg-green-500" : "bg-muted-foreground/50"}`} />
+            <span className="text-[11px] font-mono text-muted-foreground">
+              {health ? `pid ${health.pid}` : "offline"}
+            </span>
           </div>
-        )}
-      </div>
-    </aside>
+        </div>
+      </aside>
+    </>
   );
 }

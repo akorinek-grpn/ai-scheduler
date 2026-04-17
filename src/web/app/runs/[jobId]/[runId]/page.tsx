@@ -32,15 +32,16 @@ export default function RunDetailPage(): React.ReactElement {
   const statusColors: Record<string, string> = {
     running: "border-yellow-500/50 text-yellow-500",
     success: "border-green-500/50 text-green-500",
+    partial: "border-amber-500/50 text-amber-500",
     failed: "border-red-500/50 text-red-500",
     timeout: "border-orange-500/50 text-orange-500",
   };
 
   const evalStyles: Record<string, { border: string; bg: string; text: string; icon: string }> = {
-    ok: { border: "border-green-500/30", bg: "bg-green-500/5", text: "text-green-400", icon: "\u2713" },
-    info: { border: "border-blue-500/30", bg: "bg-blue-500/5", text: "text-blue-400", icon: "\u2139" },
-    warning: { border: "border-amber-500/30", bg: "bg-amber-500/5", text: "text-amber-400", icon: "\u26A0" },
-    critical: { border: "border-red-500/30", bg: "bg-red-500/5", text: "text-red-400", icon: "!!" },
+    ok: { border: "border-green-500/30", bg: "bg-green-500/5", text: "text-green-500", icon: "\u2713" },
+    info: { border: "border-blue-500/30", bg: "bg-blue-500/5", text: "text-blue-500", icon: "\u2139" },
+    warning: { border: "border-amber-500/30", bg: "bg-amber-500/5", text: "text-amber-500", icon: "\u26A0" },
+    critical: { border: "border-red-500/30", bg: "bg-red-500/5", text: "text-red-500", icon: "!!" },
   };
 
   const evalData = run?.evaluation;
@@ -109,7 +110,7 @@ export default function RunDetailPage(): React.ReactElement {
                     AI Evaluation — {evalData.severity.charAt(0).toUpperCase() + evalData.severity.slice(1)}
                   </span>
                   {evalData.followUpNeeded && (
-                    <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-400">
+                    <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-500">
                       follow-up needed
                     </Badge>
                   )}
@@ -122,7 +123,7 @@ export default function RunDetailPage(): React.ReactElement {
                   </p>
                 )}
                 {evalData.evaluatedAt && (
-                  <p className="text-xs text-muted-foreground/50 mt-2">
+                  <p className="text-xs text-muted-foreground mt-2">
                     Evaluated {new Date(evalData.evaluatedAt).toLocaleString()}
                   </p>
                 )}

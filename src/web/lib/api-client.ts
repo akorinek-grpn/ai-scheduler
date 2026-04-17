@@ -35,7 +35,7 @@ export interface RunResponse {
   runId: string;
   jobName: string;
   directory: string;
-  status: "running" | "success" | "failed" | "timeout";
+  status: "running" | "success" | "partial" | "failed" | "timeout";
   trigger: "scheduled" | "manual";
   startedAt: string;
   finishedAt: string | null;

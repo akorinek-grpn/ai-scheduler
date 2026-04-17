@@ -1,6 +1,5 @@
 "use client";
 
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RunHistoryDots } from "@/components/run-history-dots";
@@ -15,11 +14,18 @@ interface JobCardProps {
   onTrigger: () => void;
 }
 
-const severityStyles: Record<string, { text: string; bg: string; border: string; panelBg: string }> = {
-  ok: { text: "text-green-400", bg: "bg-green-500", border: "border-green-500/30", panelBg: "bg-green-500/5" },
-  info: { text: "text-blue-400", bg: "bg-blue-500", border: "border-blue-500/30", panelBg: "bg-blue-500/5" },
-  warning: { text: "text-amber-400", bg: "bg-amber-500", border: "border-amber-500/30", panelBg: "bg-amber-500/5" },
-  critical: { text: "text-red-400", bg: "bg-red-500", border: "border-red-500/30", panelBg: "bg-red-500/5" },
+const severityText: Record<string, string> = {
+  ok: "text-green-500",
+  info: "text-blue-500",
+  warning: "text-amber-500",
+  critical: "text-red-500",
+};
+
+const severityBg: Record<string, string> = {
+  ok: "",
+  info: "",
+  warning: "bg-amber-500/[0.04]",
+  critical: "bg-red-500/[0.05]",
 };
 
 export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.ReactElement {
@@ -51,112 +57,85 @@ export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.Rea
   };
 
   const lastRun = recentRuns[0];
-  const lastRunStatus = lastRun?.status;
-  const statusColor = lastRunStatus === "success"
+  const statusColor = lastRun?.status === "success"
     ? "bg-green-500"
-    : lastRunStatus === "failed"
-      ? "bg-red-500"
-      : lastRunStatus === "running"
-        ? "bg-yellow-500"
-        : lastRunStatus === "timeout"
-          ? "bg-orange-500"
-          : "bg-zinc-500";
+    : lastRun?.status === "partial"
+      ? "bg-amber-500"
+      : lastRun?.status === "failed"
+        ? "bg-red-500"
+        : lastRun?.status === "running"
+          ? "bg-yellow-500"
+          : lastRun?.status === "timeout"
+            ? "bg-orange-500"
+            : "bg-muted-foreground/50";
 
-  // Success rate from recent runs
   const completedRuns = recentRuns.filter((r) => r.status !== "running");
   const successRuns = completedRuns.filter((r) => r.status === "success");
   const successRate = completedRuns.length > 0
     ? Math.round((successRuns.length / completedRuns.length) * 100)
     : null;
 
-  // Latest evaluation
   const lastEval = recentRuns.find((r) => r.evaluation)?.evaluation;
 
   return (
-    <Card className={!job.enabled ? "opacity-60 border-dashed" : ""}>
-      <CardContent className="pt-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-semibold truncate pr-2">{job.name}</span>
-          <div className="flex items-center gap-2 shrink-0">
-            {!job.enabled && (
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-zinc-500 border-zinc-600">
-                disabled
-              </Badge>
-            )}
-            {lastRunStatus === "running" && (
-              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
-            )}
-            <div className={`h-2 w-2 rounded-full ${job.enabled ? statusColor : "bg-zinc-600"}`} />
-          </div>
-        </div>
-
-        <div className="text-xs text-muted-foreground font-mono mb-1 truncate">
-          {job.directory.split("/").pop()}
-        </div>
-        <div className="text-xs text-muted-foreground mb-3">
-          {formatCronHuman(job.schedule)}
-          {job.model && ` · ${job.model}`}
-        </div>
-
-        {/* Evaluation summary */}
-        {lastEval && (
-          <div className={`rounded-md px-2.5 py-2 mb-3 border ${
-            severityStyles[lastEval.severity]?.border ?? "border-border"
-          } ${severityStyles[lastEval.severity]?.panelBg ?? ""}`}>
-            <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-              <Badge
-                variant="outline"
-                className={`text-[10px] px-1.5 py-0 ${severityStyles[lastEval.severity]?.text ?? ""}`}
-              >
-                {lastEval.severity}
-              </Badge>
-              {lastEval.followUpNeeded && (
-                <span className="text-[10px] text-amber-400">follow-up</span>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
-              {lastEval.summary}
-            </p>
-          </div>
+    <div className={`rounded border border-border p-3 transition-colors hover:bg-secondary/30 ${!job.enabled ? "opacity-60" : ""}`}>
+      {/* Header: name + status dot */}
+      <div className="flex items-center gap-2 mb-1">
+        <div className={`h-1.5 w-1.5 rounded-full shrink-0 ${statusColor}`} />
+        <span className="text-[13px] font-medium truncate">{job.name}</span>
+        {successRate !== null && (
+          <span className={`text-[11px] font-mono tabular-nums ml-auto shrink-0 ${
+            successRate >= 80 ? "text-green-500" : successRate >= 50 ? "text-amber-500" : "text-red-500"
+          }`}>
+            {successRate}%
+          </span>
         )}
+      </div>
 
-        {/* Run history dots */}
+      {/* Meta line */}
+      <div className="text-[11px] text-muted-foreground mb-2 truncate">
+        <span className="font-mono">{job.directory.split("/").pop()}</span>
+        <span className="mx-1.5 text-border">/</span>
+        <span>{formatCronHuman(job.schedule)}</span>
+        {job.model && <span className="ml-1.5 text-muted-foreground">{job.model}</span>}
+      </div>
+
+      {/* Eval summary (compact) */}
+      {lastEval && (
+        <div className={`rounded px-2 py-1.5 mb-2 ${severityBg[lastEval.severity] ?? ""}`}>
+          <p className={`text-[11px] leading-relaxed line-clamp-2 ${severityText[lastEval.severity] ?? "text-muted-foreground"}`}>
+            {lastEval.severity !== "ok" && <span className="font-medium">{lastEval.severity}: </span>}
+            {lastEval.summary}
+          </p>
+        </div>
+      )}
+
+      {/* Run history + actions */}
+      <div className="flex items-center gap-2 pt-1.5 border-t border-border/50">
         {recentRuns.length > 0 && (
-          <div className="mb-3">
-            <RunHistoryDots runs={recentRuns} count={3} />
-          </div>
+          <RunHistoryDots runs={recentRuns} count={3} />
         )}
-
-        {/* Footer with toggle, run, and success rate */}
-        <div className="flex items-center gap-2 border-t border-border pt-3">
+        <div className="ml-auto flex items-center gap-1">
           <Button
-            variant={job.enabled ? "outline" : "default"}
+            variant="ghost"
             size="sm"
-            className={`text-xs ${job.enabled ? "text-muted-foreground hover:text-red-400 hover:border-red-400/50" : "bg-green-600 hover:bg-green-500 text-white"}`}
+            className="text-[11px] h-6 px-1.5 text-muted-foreground"
             onClick={handleToggle}
             disabled={isToggling || job.isActive}
           >
-            {isToggling ? "..." : job.enabled ? "Disable" : "Enable"}
+            {isToggling ? "..." : job.enabled ? "Off" : "On"}
           </Button>
           <Button
+            variant="outline"
             size="sm"
-            className="text-xs"
+            className="text-[11px] h-6 px-2"
             onClick={handleTrigger}
             disabled={isTriggering || job.isActive || !job.enabled}
           >
-            {isTriggering ? "Starting..." : "Run now"}
+            {isTriggering ? "..." : "Run"}
           </Button>
-          <div className="ml-auto flex items-center gap-2">
-            {successRate !== null && (
-              <span className={`text-xs font-medium ${
-                successRate >= 80 ? "text-green-500" : successRate >= 50 ? "text-amber-500" : "text-red-500"
-              }`}>
-                {successRate}% pass
-              </span>
-            )}
-          </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

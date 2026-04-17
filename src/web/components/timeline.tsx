@@ -20,6 +20,7 @@ interface TimelineSlot {
 
 const STATUS_COLORS: Record<string, string> = {
   success: "bg-green-500 hover:bg-green-400",
+  partial: "bg-amber-500 hover:bg-amber-400",
   failed: "bg-red-500 hover:bg-red-400",
   timeout: "bg-orange-500 hover:bg-orange-400",
   running: "bg-yellow-500 hover:bg-yellow-400 animate-pulse",
@@ -27,6 +28,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 const STATUS_BORDERS: Record<string, string> = {
   success: "ring-green-500/30",
+  partial: "ring-amber-500/30",
   failed: "ring-red-500/30",
   timeout: "ring-orange-500/30",
   running: "ring-yellow-500/30",
@@ -210,7 +212,7 @@ export function Timeline({ jobs, runs, startDate, days }: TimelineProps): React.
                   {daySlots.map((slot, i) => {
                     const isFuture = slot.type === "future";
                     const run = slot.run;
-                    const statusColor = run ? STATUS_COLORS[run.status] ?? "bg-zinc-500" : "";
+                    const statusColor = run ? STATUS_COLORS[run.status] ?? "bg-muted-foreground" : "";
                     const statusBorder = run ? STATUS_BORDERS[run.status] ?? "" : "";
 
                     const block = (
@@ -224,7 +226,7 @@ export function Timeline({ jobs, runs, startDate, days }: TimelineProps): React.
                           flex items-center justify-center
                           transition-all cursor-default
                           ${isFuture && !run
-                            ? "bg-zinc-700/40 text-zinc-500 border border-dashed border-zinc-600"
+                            ? "bg-muted text-muted-foreground border border-dashed border-border"
                             : `${statusColor} text-white ring-1 ${statusBorder}`
                           }
                           ${run ? "cursor-pointer" : ""}
@@ -244,7 +246,7 @@ export function Timeline({ jobs, runs, startDate, days }: TimelineProps): React.
                     return block;
                   })}
                   {daySlots.length === 0 && !job.enabled && (
-                    <span className="text-[10px] text-zinc-700 italic">disabled</span>
+                    <span className="text-[10px] text-muted-foreground italic">disabled</span>
                   )}
                 </div>
               );
@@ -268,7 +270,7 @@ export function Timeline({ jobs, runs, startDate, days }: TimelineProps): React.
             <span className="inline-block h-3 w-3 rounded bg-yellow-500" /> running
           </span>
           <span className="flex items-center gap-1">
-            <span className="inline-block h-3 w-3 rounded border border-dashed border-zinc-600 bg-zinc-700/40" /> scheduled
+            <span className="inline-block h-3 w-3 rounded border border-dashed border-border bg-muted" /> scheduled
           </span>
         </div>
       </div>

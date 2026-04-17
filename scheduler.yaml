@@ -10,13 +10,15 @@ jobs:
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
+      FAILED=0
       echo "=== Morning briefing ==="
-      bun run briefing || echo "FAILED: briefing"
+      bun run briefing || { echo "FAILED: briefing"; FAILED=2; }
       echo "=== Daily summary ==="
-      bun run summarize --today || echo "FAILED: summarize"
+      bun run summarize --today || { echo "FAILED: summarize"; FAILED=2; }
       echo "=== Action items ==="
-      bun run assess-actions || echo "FAILED: assess-actions"
+      bun run assess-actions || { echo "FAILED: assess-actions"; FAILED=2; }
       echo "=== Done ==="
+      exit $FAILED
     timeout: 3600
     enabled: true
     tags:
@@ -28,9 +30,11 @@ jobs:
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
+      FAILED=0
       echo "=== Afternoon meeting sync ==="
-      bun run summarize --today || echo "FAILED: summarize"
+      bun run summarize --today || { echo "FAILED: summarize"; FAILED=2; }
       echo "=== Done ==="
+      exit $FAILED
     timeout: 600
     enabled: true
     tags:
@@ -72,7 +76,7 @@ jobs:
       fi
       echo "=== Done ==="
     timeout: 3600
-    enabled: true
+    enabled: false
     tags:
       - daily
       - gsc-analytics

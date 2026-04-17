@@ -10,6 +10,7 @@ interface RunHistoryDotsProps {
 
 const statusColors: Record<string, string> = {
   success: "bg-green-500/80 hover:bg-green-500 border-green-500/40",
+  partial: "bg-amber-500/80 hover:bg-amber-500 border-amber-500/40",
   failed: "bg-red-500/80 hover:bg-red-500 border-red-500/40",
   timeout: "bg-orange-500/80 hover:bg-orange-500 border-orange-500/40",
   running: "bg-yellow-500/80 hover:bg-yellow-500 border-yellow-500/40 animate-pulse",
@@ -17,6 +18,7 @@ const statusColors: Record<string, string> = {
 
 const statusIcons: Record<string, string> = {
   success: "\u2713",
+  partial: "\u26A0",
   failed: "\u2717",
   timeout: "\u23F1",
   running: "\u25CF",
@@ -46,7 +48,7 @@ export function RunHistoryDots({ runs, count = 3 }: RunHistoryDotsProps): React.
           href={`/runs/${run.jobId}/${run.runId}`}
           title={`${run.status} \u2014 ${formatTime(run.startedAt)}`}
           className={`flex h-4 w-4 items-center justify-center rounded border text-[8px] text-white transition-colors ${
-            statusColors[run.status] ?? "bg-zinc-500 border-zinc-500/40"
+            statusColors[run.status] ?? "bg-muted-foreground border-muted-foreground/50"
           }`}
         >
           {statusIcons[run.status] ?? "?"}
@@ -55,7 +57,7 @@ export function RunHistoryDots({ runs, count = 3 }: RunHistoryDotsProps): React.
       {Array.from({ length: emptySlots }).map((_, i) => (
         <span
           key={`empty-${i}`}
-          className="flex h-4 w-4 items-center justify-center rounded border border-dashed border-zinc-700 text-[8px] text-zinc-700"
+          className="flex h-4 w-4 items-center justify-center rounded border border-dashed border-border text-[8px] text-muted-foreground"
           title="no run"
         >
           {"\u00B7"}

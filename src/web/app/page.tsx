@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatsCards } from "@/components/stats-cards";
 import { RunsTable } from "@/components/runs-table";
 import { JobCard } from "@/components/job-card";
 import { AiInsights } from "@/components/ai-insights";
+import { DashboardCharts } from "@/components/dashboard-charts";
 import {
   getHealth,
   getJobs,
@@ -15,35 +15,33 @@ import {
   type RunResponse,
 } from "@/lib/api-client";
 
+const GROUP_ORDER = ["daily", "weekly", "periodic"] as const;
+const GROUP_META: Record<string, { label: string; desc: string }> = {
+  daily: { label: "Daily", desc: "Weekday runs" },
+  weekly: { label: "Weekly", desc: "Once or twice a week" },
+  periodic: { label: "Periodic", desc: "Recurring interval" },
+  other: { label: "Other", desc: "Uncategorized" },
+};
+
 interface JobGroup {
+  key: string;
   label: string;
-  description: string;
+  desc: string;
   jobs: JobResponse[];
 }
 
-const GROUP_ORDER = ["daily", "weekly", "periodic"] as const;
-
-const GROUP_META: Record<string, { label: string; description: string }> = {
-  daily: { label: "Daily", description: "Runs every weekday" },
-  weekly: { label: "Weekly", description: "Runs once or twice a week" },
-  periodic: { label: "Periodic", description: "Runs on a recurring interval" },
-  other: { label: "Other", description: "Uncategorized jobs" },
-};
-
 function categorizeJobs(jobs: JobResponse[]): JobGroup[] {
   const buckets: Record<string, JobResponse[]> = {};
-
   for (const job of jobs) {
-    const category = GROUP_ORDER.find((g) => job.tags.includes(g)) ?? "other";
-    if (!buckets[category]) buckets[category] = [];
-    buckets[category].push(job);
+    const cat = GROUP_ORDER.find((g) => job.tags.includes(g)) ?? "other";
+    if (!buckets[cat]) buckets[cat] = [];
+    buckets[cat].push(job);
   }
-
   const groups: JobGroup[] = [];
   for (const key of [...GROUP_ORDER, "other"]) {
     if (buckets[key]?.length) {
       const meta = GROUP_META[key];
-      groups.push({ label: meta.label, description: meta.description, jobs: buckets[key] });
+      groups.push({ key, label: meta.label, desc: meta.desc, jobs: buckets[key] });
     }
   }
   return groups;
@@ -59,7 +57,7 @@ export default function DashboardPage(): React.ReactElement {
       const [h, j, r] = await Promise.all([
         getHealth().catch(() => null),
         getJobs().catch(() => []),
-        getRuns({ limit: 50 }).catch(() => []),
+        getRuns({ limit: 200 }).catch(() => []),
       ]);
       setHealth(h);
       setJobs(j);
@@ -75,44 +73,33 @@ export default function DashboardPage(): React.ReactElement {
     return () => clearInterval(interval);
   }, [fetchAll]);
 
-  const getJobRuns = (jobId: string): RunResponse[] => {
-    return runs.filter((r) => r.jobId === jobId).slice(0, 10);
-  };
+  const getJobRuns = (jobId: string): RunResponse[] =>
+    runs.filter((r) => r.jobId === jobId).slice(0, 10);
 
   const jobGroups = useMemo(() => categorizeJobs(jobs), [jobs]);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Overview of your scheduled AI runs
-        </p>
-      </div>
-
+    <div className="space-y-5 max-w-6xl">
       <StatsCards jobs={jobs} runs={runs} health={health} />
+
+      <DashboardCharts runs={runs} jobs={jobs} />
 
       <AiInsights runs={runs} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-semibold">Recent Runs</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <RunsTable runs={runs} limit={20} grouped />
-        </CardContent>
-      </Card>
+      <section>
+        <h2 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Recent Runs</h2>
+        <RunsTable runs={runs} limit={15} grouped />
+      </section>
 
-      {/* Job cards grouped by category */}
+      {/* Jobs by category */}
       {jobGroups.map((group) => (
-        <div key={group.label}>
-          <div className="flex items-center gap-3 mb-3">
-            <h2 className="text-sm font-semibold">{group.label}</h2>
-            <span className="text-xs text-muted-foreground">{group.description}</span>
-            <div className="flex-1 border-t border-border/40" />
-            <span className="text-xs text-muted-foreground">{group.jobs.length} jobs</span>
+        <section key={group.key}>
+          <div className="flex items-baseline gap-2 mb-2">
+            <h2 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">{group.label}</h2>
+            <span className="text-[11px] text-muted-foreground">{group.desc}</span>
+            <div className="flex-1 border-t border-border/30 ml-2 mt-0.5" />
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
             {group.jobs.map((job) => (
               <JobCard
                 key={job.id}
@@ -122,10 +109,10 @@ export default function DashboardPage(): React.ReactElement {
               />
             ))}
           </div>
-        </div>
+        </section>
       ))}
       {jobs.length === 0 && (
-        <p className="text-sm text-muted-foreground text-center py-8">
+        <p className="text-[13px] text-muted-foreground text-center py-8">
           No jobs configured. Add jobs to scheduler.yaml.
         </p>
       )}

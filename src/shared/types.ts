@@ -1,4 +1,4 @@
-export type RunStatus = "running" | "success" | "failed" | "timeout";
+export type RunStatus = "running" | "success" | "partial" | "failed" | "timeout";
 export type TriggerType = "scheduled" | "manual";
 
 export interface JobConfig {

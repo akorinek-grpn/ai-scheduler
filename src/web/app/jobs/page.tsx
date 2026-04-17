@@ -9,10 +9,10 @@ import { getJobs, getRuns, triggerJob, setJobEnabled, type JobResponse, type Run
 import { formatCronHuman } from "@/lib/format-cron";
 
 const severityStyles: Record<string, string> = {
-  ok: "text-green-400",
-  info: "text-blue-400",
-  warning: "text-amber-400",
-  critical: "text-red-400",
+  ok: "text-green-500",
+  info: "text-blue-500",
+  warning: "text-amber-500",
+  critical: "text-red-500",
 };
 
 const severityIcons: Record<string, string> = {
@@ -205,7 +205,7 @@ export default function JobsPage(): React.ReactElement {
               placeholder="Search by name, ID, or directory..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-secondary/50 border border-border rounded-md px-3 py-1.5 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+              className="w-full bg-secondary/50 border border-border rounded-md px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
 
@@ -297,7 +297,7 @@ export default function JobsPage(): React.ReactElement {
                           {job.type}
                         </Badge>
                         {!job.enabled && (
-                          <Badge variant="outline" className="text-zinc-500">disabled</Badge>
+                          <Badge variant="outline" className="text-muted-foreground">disabled</Badge>
                         )}
                         {job.tags.map((tag) => (
                           <Badge
@@ -323,7 +323,7 @@ export default function JobsPage(): React.ReactElement {
                         <span>{formatCronHuman(job.schedule)}</span>
                         {job.model && <><span className="mx-2">{"\u00B7"}</span><span>model: {job.model}</span></>}
                       </div>
-                      <div className="text-xs text-zinc-600 mt-1 max-w-xl truncate">
+                      <div className="text-xs text-muted-foreground mt-1 max-w-xl truncate">
                         {job.type === "script" ? `$ ${job.command}` : job.prompt}
                       </div>
 
@@ -335,7 +335,7 @@ export default function JobsPage(): React.ReactElement {
                           <p className="text-muted-foreground leading-relaxed line-clamp-1">
                             {lastEval.summary}
                             {lastEval.followUpNeeded && (
-                              <span className="text-amber-400 ml-2">{"\u2014"} follow-up needed</span>
+                              <span className="text-amber-500 ml-2">{"\u2014"} follow-up needed</span>
                             )}
                           </p>
                         </div>
@@ -350,17 +350,20 @@ export default function JobsPage(): React.ReactElement {
                           <span
                             className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium border ${
                               lastRun.status === "success"
-                                ? "border-green-500/30 bg-green-500/10 text-green-400"
-                                : lastRun.status === "failed"
-                                  ? "border-red-500/30 bg-red-500/10 text-red-400"
-                                  : lastRun.status === "timeout"
-                                    ? "border-orange-500/30 bg-orange-500/10 text-orange-400"
-                                    : lastRun.status === "running"
-                                      ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-400"
-                                      : "border-zinc-500/30 bg-zinc-500/10 text-zinc-400"
+                                ? "border-green-500/30 bg-green-500/10 text-green-500"
+                                : lastRun.status === "partial"
+                                  ? "border-amber-500/30 bg-amber-500/10 text-amber-500"
+                                  : lastRun.status === "failed"
+                                    ? "border-red-500/30 bg-red-500/10 text-red-500"
+                                    : lastRun.status === "timeout"
+                                      ? "border-orange-500/30 bg-orange-500/10 text-orange-500"
+                                      : lastRun.status === "running"
+                                        ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-500"
+                                        : "border-border bg-muted text-muted-foreground"
                             }`}
                           >
                             {lastRun.status === "success" && "\u2713"}
+                            {lastRun.status === "partial" && "\u26A0"}
                             {lastRun.status === "failed" && "\u2717"}
                             {lastRun.status === "timeout" && "\u23F1"}
                             {lastRun.status === "running" && (
@@ -372,7 +375,7 @@ export default function JobsPage(): React.ReactElement {
                         <Button
                           variant="outline"
                           size="sm"
-                          className={job.enabled ? "text-muted-foreground" : "text-green-400"}
+                          className={job.enabled ? "text-muted-foreground" : "text-green-500"}
                           onClick={() => handleToggle(job.id, job.enabled)}
                           disabled={togglingId === job.id || job.isActive}
                         >

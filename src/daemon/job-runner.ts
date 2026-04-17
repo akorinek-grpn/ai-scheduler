@@ -1,7 +1,7 @@
 import { spawn } from "child_process";
 import fs from "fs";
 import crypto from "crypto";
-import type { JobConfig, TriggerType, RunMeta, RunStatusFile } from "@shared/types";
+import type { JobConfig, TriggerType, RunMeta, RunStatus, RunStatusFile } from "@shared/types";
 import {
   getRunDir,
   getLogPath,
@@ -22,7 +22,7 @@ interface RunJobOptions {
 
 interface RunResult {
   runId: string;
-  status: "success" | "failed" | "timeout";
+  status: "success" | "partial" | "failed" | "timeout";
   exitCode: number | null;
 }
 
@@ -228,8 +228,15 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
       clearTimeout(timer);
       logStream.end();
 
+      const resolvedStatus: RunStatus = isTimedOut
+        ? "timeout"
+        : code === 0
+          ? "success"
+          : code === 2
+            ? "partial"
+            : "failed";
       const finalStatus: RunStatusFile = {
-        status: isTimedOut ? "timeout" : code === 0 ? "success" : "failed",
+        status: resolvedStatus,
         exitCode: code,
         startedAt: meta.startedAt,
         finishedAt: new Date().toISOString(),

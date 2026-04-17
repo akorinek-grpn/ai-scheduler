@@ -8,7 +8,7 @@ export interface Toast {
   id: string;
   title: string;
   body: string;
-  status: "started" | "success" | "failed" | "timeout";
+  status: "started" | "success" | "partial" | "failed" | "timeout";
   timestamp: number;
 }
 
@@ -67,10 +67,11 @@ export function useNotifications(): UseNotificationsResult {
 
   const notifyJobFinished = useCallback((jobName: string, jobId: string, status: string) => {
     const statusLabel = status === "success" ? "completed successfully"
-      : status === "failed" ? "failed"
-        : status === "timeout" ? "timed out"
-          : "finished";
-    const toastStatus = (status === "success" || status === "failed" || status === "timeout")
+      : status === "partial" ? "completed with failures"
+        : status === "failed" ? "failed"
+          : status === "timeout" ? "timed out"
+            : "finished";
+    const toastStatus = (status === "success" || status === "partial" || status === "failed" || status === "timeout")
       ? status as Toast["status"]
       : "success";
 
