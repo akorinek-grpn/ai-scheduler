@@ -5,6 +5,7 @@ import yaml from "js-yaml";
 import { CronEngine } from "./cron-engine";
 import { loadConfig } from "./config";
 import { getRunsDir, getLogPath, getStatusPath, getMetaPath, getEvalPath } from "@shared/paths";
+import { getActivityStats } from "./stats";
 import type { RunSummary, RunMeta, RunStatusFile, RunEvaluation } from "@shared/types";
 
 export function createApp(engine: CronEngine, projectRoot: string, startedAt: string): express.Express {
@@ -203,6 +204,13 @@ export function createApp(engine: CronEngine, projectRoot: string, startedAt: st
     }
 
     res.json(result);
+  });
+
+  app.get("/api/stats/activity", (req, res) => {
+    const raw = parseInt(req.query.days as string, 10);
+    const days = Number.isFinite(raw) ? Math.min(90, Math.max(1, raw)) : 30;
+    const stats = getActivityStats(projectRoot, days);
+    res.json(stats);
   });
 
   return app;

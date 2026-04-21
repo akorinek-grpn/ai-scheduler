@@ -112,4 +112,31 @@ describe("daemon API", () => {
     expect(runs[0].jobId).toBe("test-job");
     expect(runs[0].status).toBe("success");
   });
+
+  describe("GET /api/stats/activity", () => {
+    it("returns lifetime + daily stats with default 30-day window", async () => {
+      const app = createApp(engine, tmpDir, new Date().toISOString());
+      const res = await request(app, "GET", "/api/stats/activity");
+
+      expect(res.status).toBe(200);
+      const body = res.body as { lifetime: { sessions: number; toolCalls: number; toolsByName: Record<string, number> }; daily: Array<{ date: string; sessions: number; toolCalls: number }> };
+      expect(body.lifetime).toBeDefined();
+      expect(body.lifetime.sessions).toBe(0);
+      expect(Array.isArray(body.daily)).toBe(true);
+      expect(body.daily.length).toBe(30);
+    });
+
+    it("respects ?days= query param (clamped to 1..90)", async () => {
+      const app = createApp(engine, tmpDir, new Date().toISOString());
+
+      const seven = await request(app, "GET", "/api/stats/activity?days=7");
+      expect((seven.body as { daily: unknown[] }).daily.length).toBe(7);
+
+      const tooMany = await request(app, "GET", "/api/stats/activity?days=500");
+      expect((tooMany.body as { daily: unknown[] }).daily.length).toBe(90);
+
+      const zero = await request(app, "GET", "/api/stats/activity?days=0");
+      expect((zero.body as { daily: unknown[] }).daily.length).toBe(1);
+    });
+  });
 });
