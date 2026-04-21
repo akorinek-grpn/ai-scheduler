@@ -90,3 +90,22 @@ export function setJobEnabled(jobId: string, enabled: boolean): Promise<{ ok: bo
     body: JSON.stringify({ enabled }),
   });
 }
+
+export interface ActivityDayBucket {
+  date: string;
+  sessions: number;
+  toolCalls: number;
+}
+
+export interface ActivityStatsResponse {
+  lifetime: {
+    sessions: number;
+    toolCalls: number;
+    toolsByName: Record<string, number>;
+  };
+  daily: ActivityDayBucket[];
+}
+
+export function getActivityStats(days = 30): Promise<ActivityStatsResponse> {
+  return fetchApi(`/stats/activity?days=${days}`);
+}
