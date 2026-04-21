@@ -1,12 +1,13 @@
 import { spawn } from "child_process";
 import fs from "fs";
 import crypto from "crypto";
-import type { JobConfig, TriggerType, RunMeta, RunStatus, RunStatusFile } from "@shared/types";
+import type { JobConfig, TriggerType, RunMeta, RunStatus, RunStatusFile, RunStats } from "@shared/types";
 import {
   getRunDir,
   getLogPath,
   getStatusPath,
   getMetaPath,
+  getStatsPath,
   getLatestSymlink,
 } from "@shared/paths";
 
@@ -60,6 +61,26 @@ function truncate(text: string, maxLines: number): string {
   const lines = text.split("\n");
   if (lines.length <= maxLines) return text;
   return lines.slice(0, maxLines).join("\n") + `\n... (${lines.length - maxLines} more lines)`;
+}
+
+export function countToolUseInStreamEvent(line: string): string[] {
+  const trimmed = line.trim();
+  if (!trimmed) return [];
+  try {
+    const event = JSON.parse(trimmed);
+    if (event?.type !== "assistant") return [];
+    const content = event.message?.content;
+    if (!Array.isArray(content)) return [];
+    const names: string[] = [];
+    for (const block of content) {
+      if (block?.type === "tool_use" && typeof block.name === "string") {
+        names.push(block.name);
+      }
+    }
+    return names;
+  } catch {
+    return [];
+  }
 }
 
 function extractTextFromStreamJson(line: string): string | null {
@@ -184,6 +205,19 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
 
   const timeout = jobConfig.timeout ?? defaultTimeout;
 
+  const toolsByName: Record<string, number> = {};
+  let toolCalls = 0;
+
+  const isAiSession = jobConfig.type !== "script";
+
+  const writeStats = (): void => {
+    const stats: RunStats = { toolCalls, toolsByName, isAiSession };
+    fs.writeFileSync(
+      getStatsPath(projectRoot, jobId, runId),
+      JSON.stringify(stats, null, 2),
+    );
+  };
+
   return new Promise<RunResult>((resolve) => {
     const child = spawn(command, args, {
       cwd: jobConfig.directory,
@@ -208,6 +242,10 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
           const text = extractTextFromStreamJson(trimmed);
           if (text) {
             logStream.write(text);
+          }
+          for (const name of countToolUseInStreamEvent(trimmed)) {
+            toolCalls += 1;
+            toolsByName[name] = (toolsByName[name] ?? 0) + 1;
           }
         }
       });
@@ -245,6 +283,7 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
         getStatusPath(projectRoot, jobId, runId),
         JSON.stringify(finalStatus, null, 2),
       );
+      writeStats();
 
       const symlinkPath = getLatestSymlink(projectRoot, jobId);
       try {
@@ -276,6 +315,7 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
         getStatusPath(projectRoot, jobId, runId),
         JSON.stringify(finalStatus, null, 2),
       );
+      writeStats();
 
       const symPath = getLatestSymlink(projectRoot, jobId);
       try {

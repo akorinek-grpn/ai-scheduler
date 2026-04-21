@@ -1,30 +1,31 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { runJob } from "../job-runner";
+import { runJob, countToolUseInStreamEvent } from "../job-runner";
+import { getStatsPath } from "@shared/paths";
 import fs from "fs";
 import path from "path";
 import os from "os";
 import type { JobConfig, TriggerType } from "@shared/types";
 
+let tmpDir: string;
+
+const testJob: JobConfig = {
+  name: "Test Job",
+  schedule: "0 9 * * *",
+  directory: os.tmpdir(),
+  prompt: "echo hello",
+  enabled: true,
+  tags: [],
+};
+
+beforeEach(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-sched-runner-"));
+});
+
+afterEach(() => {
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
 describe("runJob", () => {
-  let tmpDir: string;
-
-  const testJob: JobConfig = {
-    name: "Test Job",
-    schedule: "0 9 * * *",
-    directory: os.tmpdir(),
-    prompt: "echo hello",
-    enabled: true,
-    tags: [],
-  };
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-sched-runner-"));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
   it("creates run directory with meta.json and status.json", async () => {
     const run = await runJob({
       jobId: "test-job",
@@ -130,4 +131,69 @@ describe("runJob", () => {
     const status = JSON.parse(fs.readFileSync(path.join(runDir, "status.json"), "utf-8"));
     expect(status.status).toBe("timeout");
   }, 10000);
+});
+
+describe("countToolUseInStreamEvent", () => {
+  it("returns tool_use names from an assistant message", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "tool_use", name: "Bash", input: { command: "ls" } },
+          { type: "text", text: "hello" },
+          { type: "tool_use", name: "Read", input: { file_path: "/x" } },
+        ],
+      },
+    });
+    expect(countToolUseInStreamEvent(line)).toEqual(["Bash", "Read"]);
+  });
+
+  it("returns an empty array for non-assistant events", () => {
+    expect(countToolUseInStreamEvent(JSON.stringify({ type: "result", result: "" }))).toEqual([]);
+    expect(countToolUseInStreamEvent(JSON.stringify({ type: "user", message: {} }))).toEqual([]);
+  });
+
+  it("returns an empty array for invalid JSON", () => {
+    expect(countToolUseInStreamEvent("not json")).toEqual([]);
+    expect(countToolUseInStreamEvent("")).toEqual([]);
+  });
+});
+
+describe("runJob stats.json", () => {
+  it("writes stats.json with zero counts for test command overrides", async () => {
+    const run = await runJob({
+      jobId: "test-job",
+      jobConfig: testJob,
+      projectRoot: tmpDir,
+      trigger: "manual",
+      command: "echo",
+      args: ["hello"],
+    });
+
+    const statsPath = getStatsPath(tmpDir, "test-job", run.runId);
+    expect(fs.existsSync(statsPath)).toBe(true);
+
+    const stats = JSON.parse(fs.readFileSync(statsPath, "utf-8"));
+    expect(stats.toolCalls).toBe(0);
+    expect(stats.toolsByName).toEqual({});
+    // testJob has no `type` set → defaults to claude semantics for stats.
+    expect(stats.isAiSession).toBe(true);
+  });
+
+  it("writes stats.json with isAiSession=false for script jobs", async () => {
+    const scriptJob: JobConfig = { ...testJob, type: "script", command: "echo hi" };
+    const run = await runJob({
+      jobId: "script-job",
+      jobConfig: scriptJob,
+      projectRoot: tmpDir,
+      trigger: "manual",
+      command: "echo",
+      args: ["hello"],
+    });
+
+    const stats = JSON.parse(fs.readFileSync(getStatsPath(tmpDir, "script-job", run.runId), "utf-8"));
+    expect(stats.toolCalls).toBe(0);
+    expect(stats.toolsByName).toEqual({});
+    expect(stats.isAiSession).toBe(false);
+  });
 });
