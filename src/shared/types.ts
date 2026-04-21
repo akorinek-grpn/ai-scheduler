@@ -62,6 +62,12 @@ export interface RunEvaluation {
   evaluatedAt: string;
 }
 
+export interface RunStats {
+  toolCalls: number;
+  toolsByName: Record<string, number>;
+  isAiSession: boolean;
+}
+
 export interface RunSummary {
   jobId: string;
   runId: string;
