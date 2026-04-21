@@ -5,6 +5,7 @@ import { StatsCards } from "@/components/stats-cards";
 import { RunsTable } from "@/components/runs-table";
 import { JobCard } from "@/components/job-card";
 import { AiInsights } from "@/components/ai-insights";
+import { LifetimeActivity } from "@/components/lifetime-activity";
 import { DashboardCharts } from "@/components/dashboard-charts";
 import {
   getHealth,
@@ -81,6 +82,8 @@ export default function DashboardPage(): React.ReactElement {
   return (
     <div className="space-y-5 max-w-6xl">
       <StatsCards jobs={jobs} runs={runs} health={health} />
+
+      <LifetimeActivity />
 
       <DashboardCharts runs={runs} jobs={jobs} />
 
