@@ -68,6 +68,21 @@ export interface RunStats {
   isAiSession: boolean;
 }
 
+export interface ActivityDayBucket {
+  date: string; // YYYY-MM-DD
+  sessions: number;
+  toolCalls: number;
+}
+
+export interface ActivityStatsResponse {
+  lifetime: {
+    sessions: number;
+    toolCalls: number;
+    toolsByName: Record<string, number>;
+  };
+  daily: ActivityDayBucket[];
+}
+
 export interface RunSummary {
   jobId: string;
   runId: string;

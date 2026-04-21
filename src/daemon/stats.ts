@@ -1,7 +1,8 @@
 import fs from "fs";
+import path from "path";
 
-import type { RunMeta, RunStats } from "@shared/types";
-import { getLogPath, getMetaPath, getStatsPath } from "@shared/paths";
+import type { ActivityDayBucket, ActivityStatsResponse, RunMeta, RunStats } from "@shared/types";
+import { getLogPath, getMetaPath, getRunsDir, getStatsPath } from "@shared/paths";
 
 const TOOL_MARKER = /^> \[([^\]]+)\]/;
 
@@ -63,4 +64,71 @@ export function getOrBackfillRunStats(
   }
 
   return stats;
+}
+
+function buildEmptyDailyBuckets(days: number): ActivityDayBucket[] {
+  const buckets: ActivityDayBucket[] = [];
+  const todayUtc = new Date();
+  todayUtc.setUTCHours(0, 0, 0, 0);
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(todayUtc);
+    d.setUTCDate(d.getUTCDate() - i);
+    buckets.push({ date: d.toISOString().slice(0, 10), sessions: 0, toolCalls: 0 });
+  }
+  return buckets;
+}
+
+export function getActivityStats(projectRoot: string, days: number): ActivityStatsResponse {
+  const runsDir = getRunsDir(projectRoot);
+  const daily = buildEmptyDailyBuckets(days);
+  const bucketIndex = new Map(daily.map((b) => [b.date, b]));
+
+  const lifetime = {
+    sessions: 0,
+    toolCalls: 0,
+    toolsByName: {} as Record<string, number>,
+  };
+
+  if (!fs.existsSync(runsDir)) {
+    return { lifetime, daily };
+  }
+
+  for (const jobId of fs.readdirSync(runsDir)) {
+    const jobDir = path.join(runsDir, jobId);
+    if (!fs.statSync(jobDir).isDirectory()) continue;
+
+    for (const runId of fs.readdirSync(jobDir)) {
+      if (runId === "latest") continue;
+      const runPath = path.join(jobDir, runId);
+      if (!fs.statSync(runPath).isDirectory()) continue;
+
+      const metaPath = getMetaPath(projectRoot, jobId, runId);
+      if (!fs.existsSync(metaPath)) continue;
+
+      let meta: RunMeta;
+      try {
+        meta = JSON.parse(fs.readFileSync(metaPath, "utf-8")) as RunMeta;
+      } catch {
+        continue;
+      }
+
+      const stats = getOrBackfillRunStats(projectRoot, jobId, runId);
+      if (!stats || !stats.isAiSession) continue;
+
+      lifetime.sessions += 1;
+      lifetime.toolCalls += stats.toolCalls;
+      for (const [name, count] of Object.entries(stats.toolsByName)) {
+        lifetime.toolsByName[name] = (lifetime.toolsByName[name] ?? 0) + count;
+      }
+
+      const dateKey = new Date(meta.startedAt).toISOString().slice(0, 10);
+      const bucket = bucketIndex.get(dateKey);
+      if (bucket) {
+        bucket.sessions += 1;
+        bucket.toolCalls += stats.toolCalls;
+      }
+    }
+  }
+
+  return { lifetime, daily };
 }
