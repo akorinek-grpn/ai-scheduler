@@ -42,10 +42,28 @@ function startHeartbeat(engine: CronEngine, startedAt: string, port: number): No
 
 function watchConfig(engine: CronEngine): void {
   let debounceTimer: NodeJS.Timeout | null = null;
+  // macOS fs.watch can fire spurious events even when the file hasn't changed.
+  // Compare raw content against the last-seen version to avoid reload storms.
+  let lastContent: string | null = null;
+  try {
+    lastContent = fs.readFileSync(CONFIG_PATH, "utf-8");
+  } catch {
+    // Will be picked up on the first real event.
+  }
 
   fs.watch(CONFIG_PATH, () => {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
+      let raw: string;
+      try {
+        raw = fs.readFileSync(CONFIG_PATH, "utf-8");
+      } catch (err) {
+        console.error(`[daemon] Config read failed: ${(err as Error).message}`);
+        return;
+      }
+      if (raw === lastContent) return;
+      lastContent = raw;
+
       console.log("[daemon] Config change detected, reloading...");
       const result = loadConfig(CONFIG_PATH);
       if (result.success) {
