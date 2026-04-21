@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getRunDir, getJobDir, getLogPath, getStatusPath, getMetaPath, getDaemonJsonPath } from "@shared/paths";
+import { getRunDir, getJobDir, getLogPath, getStatusPath, getMetaPath, getDaemonJsonPath, getStatsPath } from "@shared/paths";
 import path from "path";
 
 const PROJECT_ROOT = "/Users/test/ai-scheduler";
@@ -33,5 +33,9 @@ describe("paths", () => {
   it("getDaemonJsonPath returns data/daemon.json", () => {
     const result = getDaemonJsonPath(PROJECT_ROOT);
     expect(result).toBe(path.join(PROJECT_ROOT, "data/daemon.json"));
+  });
+
+  it("getStatsPath returns data/runs/<job>/<run>/stats.json", () => {
+    expect(getStatsPath("/root", "j1", "r1")).toBe("/root/data/runs/j1/r1/stats.json");
   });
 });

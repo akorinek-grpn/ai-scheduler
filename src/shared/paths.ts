@@ -39,3 +39,7 @@ export function getLatestSymlink(projectRoot: string, jobId: string): string {
 export function getEvalPath(projectRoot: string, jobId: string, runId: string): string {
   return path.join(getRunDir(projectRoot, jobId, runId), "evaluation.json");
 }
+
+export function getStatsPath(projectRoot: string, jobId: string, runId: string): string {
+  return path.join(getRunDir(projectRoot, jobId, runId), "stats.json");
+}
