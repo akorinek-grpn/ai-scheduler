@@ -95,11 +95,12 @@ jobs:
     timeout: 1800
     enabled: true
     tags:
+      - periodic
       - twice-weekly
       - market-researcher
   executive-review:
     name: Executive Review — Daily Summary
-    schedule: 0 18 * * 1-5
+    schedule: 5 18 * * 1-5
     directory: /Users/akorinek/Programming/ai-scheduler
     prompt: |
       You are the executive review agent. Review today's scheduled run results and write a summary.
@@ -118,7 +119,7 @@ jobs:
       Save the summary to data/daily-summary-$(date +%Y-%m-%d).md
     model: sonnet
     skip_permissions: true
-    timeout: 300
+    timeout: 600
     enabled: true
     tags:
       - daily
@@ -207,7 +208,7 @@ jobs:
       - meta
   eod-report:
     name: EOD Report — End of Day Update
-    schedule: 0 18 * * 1-5
+    schedule: 10 18 * * 1-5
     directory: /Users/akorinek/Programming/ai-scheduler
     prompt: |
       Read the skill file at ~/.claude/skills/daily-reporting/SKILL.md and follow it exactly.
@@ -228,9 +229,22 @@ jobs:
       Review open PRs on configured repos. For each PR that needs review,
       read and follow ~/.claude/skills/pr-review/SKILL.md exactly.
 
-      ## Repos to check
-      - groupon/echelon (github.com) — all open PRs
-      - Mobile-Next/next-pwa-app (github.groupondev.com) — only PRs with label "SEO"
+      ## Repos to check — with host-specific "my username" pinned per repo
+      - groupon/echelon (github.com) — my username: akorinek-grpn — all open PRs
+      - Mobile-Next/next-pwa-app (github.groupondev.com) — my username: akorinek — only PRs with label "SEO"
+
+      ## CRITICAL: host → username mapping
+      | Host | My username | Self-review filter (author login to skip) | Prior-review filter (reviewer login) |
+      |---|---|---|---|
+      | github.com | akorinek-grpn | akorinek-grpn | akorinek-grpn |
+      | github.groupondev.com | akorinek | akorinek | akorinek |
+
+      These are DIFFERENT accounts. Using the wrong one returns zero hits from the reviews API
+      and causes duplicate reviews on the same HEAD commit (this happened to
+      groupon/echelon PR #285 on 2026-04-16 — two reviews 8h apart on the same SHA).
+      For every `select(.user.login == "<X>")` filter you construct, pick `<X>` from the
+      table above based on which host the repo lives on. Do not rely on config.json's
+      single `github_username` field (that's the GHE one only).
 
       ## For each repo above:
       1. List open, non-draft PRs:
@@ -242,48 +256,160 @@ jobs:
            ```
            GH_HOST=github.groupondev.com gh pr list --repo <repo> --state open --json number,title,author,createdAt,isDraft,labels --limit 10
            ```
-      2. Filter out drafts and PRs authored by akorinek-grpn (don't self-review).
+      2. Filter out drafts and PRs authored by ME (self-review filter from the table
+         above — use `akorinek-grpn` on github.com, `akorinek` on github.groupondev.com).
       3. If the repo has a label filter (e.g., "SEO"), additionally filter to only PRs that have that label.
-      4. For each remaining PR (oldest first), decide whether to review:
-         a. Get my reviews on this PR:
+      4. For each remaining PR (oldest first), decide whether to review.
+
+         a. Fetch my FULL review history on this PR (not just last review) — USING THE
+            HOST-CORRECT USERNAME from the table. We need the full array because an
+            earlier approval must stick even if later runs flipped the state:
             ```
-            gh api repos/<repo>/pulls/<number>/reviews --jq '[.[] | select(.user.login == "akorinek-grpn")] | sort_by(.submitted_at) | last | {commit_id, submitted_at, state}'
+            # github.com example:
+            gh api repos/<repo>/pulls/<number>/reviews --jq '[.[] | select(.user.login == "akorinek-grpn")] | sort_by(.submitted_at) | map({state, submitted_at, commit_id: .commit_id[0:8]})'
+            # GHE example:
+            GH_HOST=github.groupondev.com gh api repos/<repo>/pulls/<number>/reviews --jq '[.[] | select(.user.login == "akorinek")] | sort_by(.submitted_at) | map({state, submitted_at, commit_id: .commit_id[0:8]})'
             ```
+            From that array, compute three values:
+            - `ever_approved`: `true` if ANY review has state == "APPROVED".
+            - `latest`: the last element (most recent review), or null if the array is empty.
+            - `latest_state`, `latest_commit`, `latest_age_hours`: fields of `latest`.
+
          b. Get the current HEAD SHA:
             ```
             gh pr view <number> --repo <repo> --json headRefOid --jq '.headRefOid'
             ```
-         c. Decision:
-            - **No prior review** → review this PR
-            - **Prior review exists AND head SHA == review commit_id** → skip (already reviewed, no new commits)
-            - **Prior review exists AND head SHA != review commit_id** → re-review (new commits since last review)
+
+         c. Decision ladder — evaluate in this order and take the FIRST match:
+            1. **`ever_approved == true`** → **skip** ("already approved by this account —
+               once we've approved a PR, we do NOT review it again, even if new commits
+               land. Human reviewers take over from there."). This is an **unconditional
+               terminal state** — it overrides cooldown, HEAD-change, and re-review rules.
+               If the author pushes destructive changes after our approval, they need a
+               human reviewer anyway, not another bot pass.
+            2. **No prior review** → **review this PR** (first-time).
+            3. **Head SHA == latest.commit_id** → **skip** ("already reviewed at current HEAD,
+               no new commits").
+            4. **Head SHA != latest.commit_id AND latest_age_hours < 12** → **skip** with
+               reason "cooldown (Nh ago, reviewing again at T+12h)". Computes age with
+               `(now - submitted_at_iso) / 3600`. Prevents tight re-review loops on
+               rapidly-churning branches.
+            5. **Head SHA != latest.commit_id AND latest_age_hours ≥ 12** → **re-review**
+               (new commits, cooldown passed, not previously approved).
+
+         d. ALWAYS log the decision line, even on skip — so drift is debuggable:
+            ```
+            PR <repo>#<n>: head=<sha8> prior=<sha8> ever_approved=<true|false> latest_state=<S> age=<Xh> decision=<skip|review|re-review> reason=<"approved"|"same-HEAD"|"cooldown"|"new-commits"|"first-time">
+            ```
+
          For GHE repos, prefix all gh commands with GH_HOST=github.groupondev.com.
       5. For PRs that need review:
          a. Read ~/.claude/skills/pr-review/SKILL.md
          b. Follow ALL steps in that skill file with --auto flag behavior:
             - Steps 1-6: fetch PR, filter files, understand intent, deep review, build findings
             - Step 7: generate the review summary with verdict
-            - Step 8: POST THE REVIEW VIA gh api WITH INLINE COMMENTS — this is critical:
-              * Get the HEAD SHA: `gh pr view <N> --json headRefOid --jq '.headRefOid'`
-              * Build a JSON payload with the review body + inline comments array
-              * Each inline comment has: path, line, side ("RIGHT"), body (with severity prefix)
-              * Submit via: `gh api repos/<repo>/pulls/<N>/reviews --method POST --input /tmp/pr-review-payload.json`
-              * Use GitHub's ```suggestion``` syntax for concrete fixes
+            - Step 8: POST THE REVIEW VIA `gh api ... /reviews` with the STRICT INLINE CONTRACT below.
             - Auto-approve logic (--auto mode):
               * 0 critical + 0 important findings → event: "APPROVE"
               * 0 critical + 1+ important → event: "COMMENT"
               * 1+ critical → event: "REQUEST_CHANGES"
             - Re-review: if prior review exists, diff only new commits and don't duplicate prior comments
+
+         ## STRICT INLINE-COMMENT CONTRACT
+
+         The biggest historical failure mode of this job is posting reviews with
+         `"comments": []` and dumping every finding into the `body` as prose.
+         That produces a wall-of-text review with nothing tagged to actual code,
+         which is useless. You MUST NOT do this. Rules:
+
+         1. **Every finding that references a specific file or code location MUST
+            be an inline comment**, not a `body` bullet. A finding like
+            "in `queries/teams.ts` line ~3796 the query uses COUNT where users uses
+            SUM" → inline comment on that file at a line near that finding. A
+            finding like "PR is missing a CHANGELOG entry" has no code location →
+            that one may stay in `body` under "### Process".
+
+         2. **The `body` field is short and structural**, containing ONLY:
+            - Verdict line ("Comment" / "Approve" / "Request Changes")
+            - Scope line (files, +added/-removed)
+            - Risk line (Low/Medium/High + 1-sentence why)
+            - "### Summary" — 1-2 sentences on what the PR does
+            - "### Strengths" — 2-4 bullet praise lines
+            - "### Issues Found" — counts per severity ONLY (e.g., "2 critical, 3 important, 1 minor"). NO finding bodies here.
+            - Optional "### Process" for things with no code location
+            Target: body length under ~2500 characters. If it's longer, you're
+            putting finding details in the body — move them inline.
+
+         3. **Before calling `gh api`, self-validate the payload**:
+            - If `comments.length == 0` AND there's any finding that mentions a
+              file path → you made the mistake above. STOP, reconstruct, and move
+              those findings into `comments` with valid line numbers. Do NOT post.
+            - If `body` contains `[Critical]`, `[Important]`, or `[Minor]` headers
+              followed by multi-line detail → same mistake. Move the detail into
+              inline `comments` and leave only the severity count in the body.
+
+         4. **How to pick a valid line number** (this is where people fail and then
+            give up and stuff everything into the body — don't):
+            a. Get the diff with hunks: `gh pr diff <N> --repo <repo>` (or
+               `GH_HOST=... gh pr diff ...` on GHE).
+            b. Each file block has `@@ -a,b +c,d @@` hunk headers. The `+c,d` part
+               tells you that the new file's hunk starts at line `c` and spans `d`
+               lines. ANY line from `c` to `c+d-1` is legal for `side: "RIGHT"`.
+            c. For brand-new files, the diff header is `@@ -0,0 +1,N @@` — any
+               line 1..N is legal.
+            d. For multi-line annotations, `start_line` and `line` must both sit
+               inside the SAME hunk on the same side.
+            e. Prefer lines that are additions (`+` prefix in the diff). Context
+               lines (space prefix) within a hunk also work.
+            f. If you can't pin the finding to one exact line, pick the nearest
+               `+` line in that file's hunks. A comment near the code beats a
+               comment buried in prose.
+
+         5. **Comment body format** — each inline comment body begins with a
+            severity prefix and may include a GitHub `suggestion` block for
+            concrete fixes:
+            ```
+            **[Critical]** <one-sentence summary>
+
+            <1-3 sentences explaining why it matters>
+
+            ```suggestion
+            <corrected code>
+            ```
+            ```
+
+         6. **Posting mechanics**:
+            - HEAD SHA: `gh pr view <N> --repo <repo> --json headRefOid --jq '.headRefOid'`
+            - Write payload to `/tmp/pr-<N>-review.json` via `cat > ... << 'EOF'`
+            - Post with: `gh api repos/<repo>/pulls/<N>/reviews --method POST --input /tmp/pr-<N>-review.json`
+            - On GHE, prefix with `GH_HOST=github.groupondev.com`.
+
+         7. **On 422 error** ("Pull request review thread line must be part of the
+            diff"): the ONLY correct response is to pick a different line that IS
+            in the diff. DO NOT fall back to posting a review with
+            `comments: []` and all findings in the body. If 2-3 attempts fail on
+            the same finding, drop THAT finding entirely (log it to stdout) and
+            post the remaining inline comments. A review with 3 of 5 inline is
+            still better than a review with 0 inline.
+
+         8. **Self-audit log line** after posting: print
+            `POSTED <repo>#<N>: body_len=<X> inline_comments=<Y> event=<E>`.
+            If Y == 0 and there were file-specific findings, that's a bug — surface
+            it in the final summary so it's visible.
+
       6. After processing all repos, print a summary:
-         - PRs reviewed (first time): [list with numbers and titles]
-         - PRs re-reviewed (new commits): [list]
-         - PRs skipped (up to date): [list]
+         - PRs reviewed (first time): [list with numbers and titles, inline_comments count]
+         - PRs re-reviewed (new commits): [list with inline_comments count]
+         - PRs skipped (already approved by this account): [list with reason]
+         - PRs skipped (up to date at HEAD): [list]
+         - PRs skipped (cooldown): [list with hours remaining]
          - PRs skipped (draft/self-authored): [list]
+         - **Any review posted with 0 inline comments and file-specific findings**: flag as bug
 
       ## Important
       - ALWAYS post via gh api with inline comments — never just print the review to stdout
       - ALWAYS use the approve/comment/request-changes logic based on finding severity
-      - If gh api fails (e.g., line not in diff hunk), fall back to: `gh pr review <N> --comment --body "FULL_REVIEW"`
+      - If the 422-retry loop exhausts, drop the specific finding rather than collapsing to a body-only review
       - If a PR review fails entirely, log the error and continue to the next one
       - If there are no PRs to review, just report "No unreviewed PRs found"
     model: sonnet
