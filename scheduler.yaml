@@ -208,7 +208,7 @@ jobs:
       - meta
   eod-report:
     name: EOD Report — End of Day Update
-    schedule: 10 18 * * 1-5
+    schedule: 0 18 * * 1-5
     directory: /Users/akorinek/Programming/ai-scheduler
     prompt: |
       Read the skill file at ~/.claude/skills/daily-reporting/SKILL.md and follow it exactly.
@@ -290,11 +290,11 @@ jobs:
             2. **No prior review** → **review this PR** (first-time).
             3. **Head SHA == latest.commit_id** → **skip** ("already reviewed at current HEAD,
                no new commits").
-            4. **Head SHA != latest.commit_id AND latest_age_hours < 12** → **skip** with
-               reason "cooldown (Nh ago, reviewing again at T+12h)". Computes age with
+            4. **Head SHA != latest.commit_id AND latest_age_hours < 4** → **skip** with
+               reason "cooldown (Nh ago, reviewing again at T+4h)". Computes age with
                `(now - submitted_at_iso) / 3600`. Prevents tight re-review loops on
                rapidly-churning branches.
-            5. **Head SHA != latest.commit_id AND latest_age_hours ≥ 12** → **re-review**
+            5. **Head SHA != latest.commit_id AND latest_age_hours ≥ 4** → **re-review**
                (new commits, cooldown passed, not previously approved).
 
          d. ALWAYS log the decision line, even on skip — so drift is debuggable:
