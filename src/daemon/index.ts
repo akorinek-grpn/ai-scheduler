@@ -3,7 +3,8 @@ import path from "path";
 import { loadConfig } from "./config";
 import { CronEngine } from "./cron-engine";
 import { createApp } from "./api";
-import { getDaemonJsonPath, getRunsDir, getStatusPath } from "@shared/paths";
+import { getDaemonJsonPath, getRunsDir, getStatusPath, getLatestRunStartedAt } from "@shared/paths";
+import { CatchupQueue, detectMissedRun } from "./catchup";
 import type { DaemonHealth, RunStatusFile } from "@shared/types";
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
@@ -126,6 +127,37 @@ async function main(): Promise<void> {
   const startedAt = new Date().toISOString();
   const engine = new CronEngine(PROJECT_ROOT);
   engine.loadJobs(configResult.data);
+
+  const catchupQueue = new CatchupQueue({
+    runCatchup: async (jobId, slot) => {
+      await engine.runCatchup(jobId, slot);
+    },
+    isJobActive: (jobId) => engine.getActiveJobIds().includes(jobId),
+    jobName: (jobId) => engine.getCurrentConfig()?.jobs[jobId]?.name ?? jobId,
+  });
+  engine.setCatchupQueue(catchupQueue);
+
+  const now = new Date();
+  let enqueuedCount = 0;
+  for (const [jobId, jobConfig] of Object.entries(configResult.data.jobs)) {
+    if (!jobConfig.enabled) continue;
+    const lastStartedAt = getLatestRunStartedAt(PROJECT_ROOT, jobId);
+    const missed = detectMissedRun({
+      schedule: jobConfig.schedule,
+      lastStartedAt,
+      now,
+      isActive: engine.getActiveJobIds().includes(jobId),
+    });
+    if (missed) {
+      catchupQueue.enqueue(jobId, missed);
+      enqueuedCount += 1;
+      console.log(`[catchup] Enqueued ${jobId} for missed slot ${missed.toISOString()}`);
+    }
+  }
+  if (enqueuedCount > 0) {
+    console.log(`[catchup] ${enqueuedCount} catch-up(s) queued from startup detection`);
+    catchupQueue.process();
+  }
 
   console.log(`[daemon] Loaded ${Object.keys(configResult.data.jobs).length} jobs`);
   console.log(`[daemon] Scheduled: ${engine.getRegisteredJobIds().join(", ") || "(none)"}`);

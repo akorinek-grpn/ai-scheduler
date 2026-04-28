@@ -1,3 +1,4 @@
+import fs from "fs";
 import path from "path";
 
 export function getDataDir(projectRoot: string): string {
@@ -42,4 +43,14 @@ export function getEvalPath(projectRoot: string, jobId: string, runId: string): 
 
 export function getStatsPath(projectRoot: string, jobId: string, runId: string): string {
   return path.join(getRunDir(projectRoot, jobId, runId), "stats.json");
+}
+
+export function getLatestRunStartedAt(projectRoot: string, jobId: string): string | null {
+  try {
+    const runId = fs.readlinkSync(getLatestSymlink(projectRoot, jobId));
+    const meta = JSON.parse(fs.readFileSync(getMetaPath(projectRoot, jobId, runId), "utf-8"));
+    return typeof meta?.startedAt === "string" ? meta.startedAt : null;
+  } catch {
+    return null;
+  }
 }
