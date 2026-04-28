@@ -213,5 +213,14 @@ export function createApp(engine: CronEngine, projectRoot: string, startedAt: st
     res.json(stats);
   });
 
+  app.get("/api/queue/catchups", (_req, res) => {
+    const queue = engine.getCatchupQueue();
+    if (!queue) {
+      res.json({ queued: [], inFlight: null });
+      return;
+    }
+    res.json(queue.snapshot());
+  });
+
   return app;
 }

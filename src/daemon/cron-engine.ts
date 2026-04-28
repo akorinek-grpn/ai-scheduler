@@ -125,6 +125,10 @@ export class CronEngine {
     this.catchupQueue = queue;
   }
 
+  getCatchupQueue(): CatchupQueue | null {
+    return this.catchupQueue;
+  }
+
   async runCatchup(
     jobId: string,
     missedSlot: Date,

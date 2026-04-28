@@ -139,4 +139,15 @@ describe("daemon API", () => {
       expect((zero.body as { daily: unknown[] }).daily.length).toBe(1);
     });
   });
+
+  describe("GET /api/queue/catchups", () => {
+    it("returns an empty snapshot when no catch-up queue is set", async () => {
+      const app = createApp(engine, tmpDir, new Date().toISOString());
+      const res = await request(app, "GET", "/api/queue/catchups");
+      expect(res.status).toBe(200);
+      const body = res.body as { queued: unknown[]; inFlight: unknown };
+      expect(body.queued).toEqual([]);
+      expect(body.inFlight).toBeNull();
+    });
+  });
 });
