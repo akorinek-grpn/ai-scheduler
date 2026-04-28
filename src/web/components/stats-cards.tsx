@@ -1,14 +1,20 @@
 "use client";
 
-import type { RunResponse, JobResponse, HealthResponse } from "@/lib/api-client";
+import type {
+  RunResponse,
+  JobResponse,
+  HealthResponse,
+  CatchupQueueSnapshot,
+} from "@/lib/api-client";
 
 interface StatsCardsProps {
   jobs: JobResponse[];
   runs: RunResponse[];
   health: HealthResponse | null;
+  catchups?: CatchupQueueSnapshot | null;
 }
 
-export function StatsCards({ jobs, runs, health }: StatsCardsProps): React.ReactElement {
+export function StatsCards({ jobs, runs, health, catchups }: StatsCardsProps): React.ReactElement {
   const enabledCount = jobs.filter((j) => j.enabled).length;
   const todayRuns = runs.filter((r) => {
     return new Date(r.startedAt).toDateString() === new Date().toDateString();
@@ -61,6 +67,26 @@ export function StatsCards({ jobs, runs, health }: StatsCardsProps): React.React
           <div className="flex items-baseline gap-1.5">
             <span className="text-[13px] font-mono font-semibold text-amber-500 tabular-nums">{followUpCount}</span>
             <span className="text-[12px] text-amber-500/80">need follow-up</span>
+          </div>
+        </>
+      )}
+
+      {/* Catch-ups queued */}
+      {catchups && (catchups.queued.length > 0 || catchups.inFlight) && (
+        <>
+          <span className="text-border">|</span>
+          <div className="flex items-baseline gap-1.5" aria-label="Catch-up queue">
+            <span className="text-[13px] font-mono font-semibold text-blue-500 tabular-nums">
+              {catchups.queued.length}
+            </span>
+            <span className="text-[12px] text-blue-500/80">
+              ↻ catch-ups queued
+            </span>
+            {catchups.inFlight && (
+              <span className="text-[11px] text-blue-500/70 ml-1">
+                · running: {catchups.inFlight.jobName}
+              </span>
+            )}
           </div>
         </>
       )}
