@@ -197,3 +197,38 @@ describe("runJob stats.json", () => {
     expect(stats.isAiSession).toBe(false);
   });
 });
+
+describe("runJob catchupFor", () => {
+  it("persists catchupFor into meta.json when provided", async () => {
+    const missedSlot = "2026-04-28T09:00:00.000Z";
+    const run = await runJob({
+      jobId: "test-job",
+      jobConfig: testJob,
+      projectRoot: tmpDir,
+      trigger: "catchup",
+      catchupFor: missedSlot,
+      command: "echo",
+      args: ["catchup"],
+    });
+
+    const metaPath = path.join(tmpDir, "data", "runs", "test-job", run.runId, "meta.json");
+    const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+    expect(meta.trigger).toBe("catchup");
+    expect(meta.catchupFor).toBe(missedSlot);
+  });
+
+  it("does not write catchupFor when not provided", async () => {
+    const run = await runJob({
+      jobId: "test-job",
+      jobConfig: testJob,
+      projectRoot: tmpDir,
+      trigger: "manual",
+      command: "echo",
+      args: ["plain"],
+    });
+
+    const metaPath = path.join(tmpDir, "data", "runs", "test-job", run.runId, "meta.json");
+    const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+    expect(meta.catchupFor).toBeUndefined();
+  });
+});

@@ -19,6 +19,7 @@ interface RunJobOptions {
   command?: string;
   args?: string[];
   defaultTimeout?: number;
+  catchupFor?: string;
 }
 
 interface RunResult {
@@ -150,7 +151,7 @@ function extractTextFromStreamJson(line: string): string | null {
 }
 
 export async function runJob(options: RunJobOptions): Promise<RunResult> {
-  const { jobId, jobConfig, projectRoot, trigger, defaultTimeout = 300 } = options;
+  const { jobId, jobConfig, projectRoot, trigger, defaultTimeout = 300, catchupFor } = options;
   const runId = generateRunId();
   const runDir = getRunDir(projectRoot, jobId, runId);
 
@@ -162,6 +163,7 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
     jobConfig,
     trigger,
     startedAt: new Date().toISOString(),
+    ...(catchupFor !== undefined ? { catchupFor } : {}),
   };
   fs.writeFileSync(getMetaPath(projectRoot, jobId, runId), JSON.stringify(meta, null, 2));
 
