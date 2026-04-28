@@ -11,9 +11,11 @@ import {
   getHealth,
   getJobs,
   getRuns,
+  getCatchupQueue,
   type HealthResponse,
   type JobResponse,
   type RunResponse,
+  type CatchupQueueSnapshot,
 } from "@/lib/api-client";
 
 const GROUP_ORDER = ["daily", "weekly", "periodic"] as const;
@@ -52,17 +54,20 @@ export default function DashboardPage(): React.ReactElement {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [jobs, setJobs] = useState<JobResponse[]>([]);
   const [runs, setRuns] = useState<RunResponse[]>([]);
+  const [catchups, setCatchups] = useState<CatchupQueueSnapshot | null>(null);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [h, j, r] = await Promise.all([
+      const [h, j, r, c] = await Promise.all([
         getHealth().catch(() => null),
         getJobs().catch(() => []),
         getRuns({ limit: 200 }).catch(() => []),
+        getCatchupQueue().catch(() => null),
       ]);
       setHealth(h);
       setJobs(j);
       setRuns(r);
+      setCatchups(c);
     } catch {
       // silently fail
     }
@@ -81,7 +86,7 @@ export default function DashboardPage(): React.ReactElement {
 
   return (
     <div className="space-y-5 max-w-6xl">
-      <StatsCards jobs={jobs} runs={runs} health={health} />
+      <StatsCards jobs={jobs} runs={runs} health={health} catchups={catchups} />
 
       <LifetimeActivity />
 
