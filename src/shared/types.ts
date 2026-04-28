@@ -1,5 +1,5 @@
 export type RunStatus = "running" | "success" | "partial" | "failed" | "timeout";
-export type TriggerType = "scheduled" | "manual";
+export type TriggerType = "scheduled" | "manual" | "catchup";
 
 export interface JobConfig {
   name: string;
@@ -34,6 +34,7 @@ export interface RunMeta {
   jobConfig: JobConfig;
   trigger: TriggerType;
   startedAt: string;
+  catchupFor?: string;
 }
 
 export interface RunStatusFile {
@@ -94,4 +95,23 @@ export interface RunSummary {
   finishedAt: string | null;
   exitCode: number | null;
   evaluation?: RunEvaluation;
+  catchupFor?: string;
+}
+
+export interface CatchupQueueEntry {
+  jobId: string;
+  jobName: string;
+  missedSlot: string;
+  enqueuedAt: string;
+}
+
+export interface CatchupQueueInFlight {
+  jobId: string;
+  jobName: string;
+  startedAt: string;
+}
+
+export interface CatchupQueueSnapshot {
+  queued: CatchupQueueEntry[];
+  inFlight: CatchupQueueInFlight | null;
 }
