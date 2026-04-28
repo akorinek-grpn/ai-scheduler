@@ -162,6 +162,18 @@ function RunRow({ run }: { run: RunResponse }): React.ReactElement {
       {run.trigger === "manual" && (
         <span className="text-[10px] text-muted-foreground shrink-0">manual</span>
       )}
+      {run.trigger === "catchup" && (
+        <span
+          className="text-[10px] text-blue-500 shrink-0 flex items-center gap-0.5"
+          title={
+            run.catchupFor
+              ? `Catch-up for missed slot at ${new Date(run.catchupFor).toLocaleString()}`
+              : "Catch-up run"
+          }
+        >
+          <span aria-hidden="true">↻</span> catch-up
+        </span>
+      )}
 
       {/* Duration */}
       <span className="text-[12px] font-mono text-muted-foreground tabular-nums w-[52px] text-right shrink-0">
