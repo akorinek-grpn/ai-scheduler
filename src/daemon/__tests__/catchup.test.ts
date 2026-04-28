@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { detectMissedRun } from "../catchup";
+import { describe, it, expect, vi } from "vitest";
+import { detectMissedRun, CatchupQueue } from "../catchup";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -73,5 +73,105 @@ describe("detectMissedRun", () => {
       isActive: false,
     });
     expect(missed).toBeNull();
+  });
+});
+
+describe("CatchupQueue", () => {
+  it("enqueues a job and surfaces it in snapshot", () => {
+    const q = new CatchupQueue({
+      runCatchup: vi.fn().mockResolvedValue(undefined),
+      isJobActive: () => false,
+      jobName: () => "Test Job",
+    });
+    q.enqueue("job-a", new Date("2026-04-28T09:00:00Z"));
+    const snap = q.snapshot();
+    expect(snap.queued).toHaveLength(1);
+    expect(snap.queued[0].jobId).toBe("job-a");
+    expect(snap.queued[0].jobName).toBe("Test Job");
+    expect(snap.queued[0].missedSlot).toBe("2026-04-28T09:00:00.000Z");
+    expect(snap.inFlight).toBeNull();
+  });
+
+  it("dedupes by jobId, keeping the latest missedSlot", () => {
+    const q = new CatchupQueue({
+      runCatchup: vi.fn().mockResolvedValue(undefined),
+      isJobActive: () => false,
+      jobName: () => "X",
+    });
+    q.enqueue("job-a", new Date("2026-04-28T08:00:00Z"));
+    q.enqueue("job-a", new Date("2026-04-28T09:00:00Z"));
+    const snap = q.snapshot();
+    expect(snap.queued).toHaveLength(1);
+    expect(snap.queued[0].missedSlot).toBe("2026-04-28T09:00:00.000Z");
+  });
+
+  it("processes one job, then waits gapMs before processing the next", async () => {
+    vi.useFakeTimers();
+    const runCatchup = vi.fn().mockResolvedValue(undefined);
+    const q = new CatchupQueue({
+      runCatchup,
+      isJobActive: () => false,
+      jobName: () => "X",
+      gapMs: 1000,
+    });
+    q.enqueue("job-a", new Date("2026-04-28T09:00:00Z"));
+    q.enqueue("job-b", new Date("2026-04-28T09:00:00Z"));
+
+    q.process();
+    await vi.waitFor(() => expect(runCatchup).toHaveBeenCalledTimes(1));
+    expect(runCatchup).toHaveBeenCalledWith("job-a", expect.any(Date));
+
+    // Before the gap elapses, the second job should not have started.
+    await vi.advanceTimersByTimeAsync(500);
+    expect(runCatchup).toHaveBeenCalledTimes(1);
+
+    // After the gap elapses, the second job runs.
+    await vi.advanceTimersByTimeAsync(600);
+    expect(runCatchup).toHaveBeenCalledTimes(2);
+    expect(runCatchup).toHaveBeenLastCalledWith("job-b", expect.any(Date));
+
+    vi.useRealTimers();
+  });
+
+  it("skips a job that is currently active and revisits later", async () => {
+    vi.useFakeTimers();
+    let active = true;
+    const runCatchup = vi.fn().mockResolvedValue(undefined);
+    const q = new CatchupQueue({
+      runCatchup,
+      isJobActive: () => active,
+      jobName: () => "X",
+      gapMs: 0,
+    });
+    q.enqueue("job-a", new Date("2026-04-28T09:00:00Z"));
+
+    q.process();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runCatchup).not.toHaveBeenCalled();
+    expect(q.snapshot().queued).toHaveLength(1);
+
+    active = false;
+    q.process();
+    await vi.waitFor(() => expect(runCatchup).toHaveBeenCalledTimes(1));
+    expect(q.snapshot().queued).toHaveLength(0);
+
+    vi.useRealTimers();
+  });
+
+  it("clears inFlight even if runCatchup rejects", async () => {
+    const runCatchup = vi.fn().mockRejectedValue(new Error("boom"));
+    const q = new CatchupQueue({
+      runCatchup,
+      isJobActive: () => false,
+      jobName: () => "X",
+      gapMs: 0,
+    });
+    q.enqueue("job-a", new Date("2026-04-28T09:00:00Z"));
+    q.process();
+    await vi.waitFor(() => expect(runCatchup).toHaveBeenCalledTimes(1));
+    // Allow microtasks to settle.
+    await new Promise((r) => setTimeout(r, 5));
+    expect(q.snapshot().inFlight).toBeNull();
+    expect(q.snapshot().queued).toHaveLength(0);
   });
 });
