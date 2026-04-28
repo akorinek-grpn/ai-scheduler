@@ -4,12 +4,14 @@ import type { JobConfig } from "@shared/types";
 import { runJob } from "./job-runner";
 import { pruneOldRuns } from "./pruner";
 import { evaluateRun } from "./evaluator";
+import type { CatchupQueue } from "./catchup";
 
 export class CronEngine {
   private projectRoot: string;
   private tasks: Map<string, ScheduledTask> = new Map();
   private activeJobs: Set<string> = new Set();
   private currentConfig: SchedulerConfig | null = null;
+  private catchupQueue: CatchupQueue | null = null;
 
   constructor(projectRoot: string) {
     this.projectRoot = projectRoot;
@@ -56,6 +58,7 @@ export class CronEngine {
   ): Promise<void> {
     if (this.activeJobs.has(jobId)) {
       console.warn(`[cron] Skipping ${jobId} — previous run still active`);
+      this.catchupQueue?.enqueue(jobId, new Date());
       return;
     }
 
@@ -78,6 +81,7 @@ export class CronEngine {
       console.error(`[cron] Error running ${jobId}:`, err);
     } finally {
       this.activeJobs.delete(jobId);
+      this.catchupQueue?.process();
     }
   }
 
@@ -113,6 +117,40 @@ export class CronEngine {
       return { runId: result.runId };
     } finally {
       this.activeJobs.delete(jobId);
+      this.catchupQueue?.process();
+    }
+  }
+
+  setCatchupQueue(queue: CatchupQueue): void {
+    this.catchupQueue = queue;
+  }
+
+  async runCatchup(
+    jobId: string,
+    missedSlot: Date,
+  ): Promise<{ runId: string } | { error: string }> {
+    if (!this.currentConfig) return { error: "No config loaded" };
+    const jobConfig = this.currentConfig.jobs[jobId];
+    if (!jobConfig) return { error: `Job not found: ${jobId}` };
+    if (this.activeJobs.has(jobId)) return { error: `Job already running: ${jobId}` };
+
+    this.activeJobs.add(jobId);
+    try {
+      const result = await runJob({
+        jobId,
+        jobConfig,
+        projectRoot: this.projectRoot,
+        trigger: "catchup",
+        catchupFor: missedSlot.toISOString(),
+        defaultTimeout: this.currentConfig.defaults.timeout,
+      });
+      evaluateRun(this.projectRoot, jobId, result.runId, jobConfig.name, result.status, result.exitCode)
+        .catch((err) => console.error(`[eval] ${jobId}: evaluation failed:`, err));
+      pruneOldRuns(this.projectRoot, jobId, this.currentConfig.defaults.retain_runs);
+      return { runId: result.runId };
+    } finally {
+      this.activeJobs.delete(jobId);
+      this.catchupQueue?.process();
     }
   }
 

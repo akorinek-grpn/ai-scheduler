@@ -109,4 +109,48 @@ describe("CronEngine", () => {
 
     engine.stopAll();
   });
+
+  it("runCatchup runs a job with trigger=catchup and writes catchupFor in meta", async () => {
+    const config = makeConfig({
+      "catchup-test-job": {
+        name: "Catch-up Test Job",
+        schedule: "0 9 * * *",
+        directory: os.tmpdir(),
+        type: "script",
+        command: "echo catchup-test",
+        enabled: true,
+        tags: [],
+      },
+    });
+
+    const engine = new CronEngine(tmpDir);
+    engine.loadJobs(config);
+
+    const result = await engine.runCatchup(
+      "catchup-test-job",
+      new Date("2026-04-28T09:00:00Z"),
+    );
+
+    expect(result).toHaveProperty("runId");
+    if (!("runId" in result)) throw new Error("expected runId");
+
+    const meta = JSON.parse(
+      fs.readFileSync(
+        path.join(tmpDir, "data", "runs", "catchup-test-job", result.runId, "meta.json"),
+        "utf-8",
+      ),
+    );
+    expect(meta.trigger).toBe("catchup");
+    expect(meta.catchupFor).toBe("2026-04-28T09:00:00.000Z");
+
+    engine.stopAll();
+  });
+
+  it("returns error from runCatchup when job is unknown", async () => {
+    const engine = new CronEngine(tmpDir);
+    engine.loadJobs(makeConfig({}));
+    const result = await engine.runCatchup("missing", new Date());
+    expect(result).toEqual({ error: "Job not found: missing" });
+    engine.stopAll();
+  });
 });
