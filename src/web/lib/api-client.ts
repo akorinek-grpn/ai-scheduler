@@ -36,11 +36,12 @@ export interface RunResponse {
   jobName: string;
   directory: string;
   status: "running" | "success" | "partial" | "failed" | "timeout";
-  trigger: "scheduled" | "manual";
+  trigger: "scheduled" | "manual" | "catchup";
   startedAt: string;
   finishedAt: string | null;
   exitCode: number | null;
   evaluation?: RunEvaluation;
+  catchupFor?: string;
 }
 
 export interface LogResponse {
@@ -108,4 +109,26 @@ export interface ActivityStatsResponse {
 
 export function getActivityStats(days = 30): Promise<ActivityStatsResponse> {
   return fetchApi(`/stats/activity?days=${days}`);
+}
+
+export interface CatchupQueueEntry {
+  jobId: string;
+  jobName: string;
+  missedSlot: string;
+  enqueuedAt: string;
+}
+
+export interface CatchupQueueInFlight {
+  jobId: string;
+  jobName: string;
+  startedAt: string;
+}
+
+export interface CatchupQueueSnapshot {
+  queued: CatchupQueueEntry[];
+  inFlight: CatchupQueueInFlight | null;
+}
+
+export function getCatchupQueue(): Promise<CatchupQueueSnapshot> {
+  return fetchApi("/queue/catchups");
 }
