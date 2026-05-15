@@ -156,9 +156,24 @@ jobs:
       - weekly
       - personalized-helper
       - five-fifteen
+  friday-515:
+    name: My 5/15 Draft — Friday Afternoon
+    schedule: 30 16 * * 5
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    type: script
+    command: |
+      echo "=== Generating 5/15 draft ==="
+      bun run compliance --fresh --with-my-515
+      echo "=== Done ==="
+    timeout: 900
+    enabled: true
+    tags:
+      - weekly
+      - personalized-helper
+      - five-fifteen
   friday-compliance:
     name: Compliance Check — Friday Evening
-    schedule: 0 16,19,22 * * 5
+    schedule: 0 16,18,20,22 * * 5
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
