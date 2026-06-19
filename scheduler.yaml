@@ -1,22 +1,24 @@
 version: 1
 defaults:
   timeout: 600
-  max_retries: 0
+  max_retries: 3
   retain_runs: 30
 jobs:
   daily-ops:
-    name: Daily Ops — Briefing & Summary
-    schedule: 0 7 * * 1-5
+    name: Daily Ops — Summary, Briefing, Actions & Compliance Refresh
+    schedule: 30 7 * * 1-5
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
       FAILED=0
-      echo "=== Morning briefing ==="
-      bun run briefing || { echo "FAILED: briefing"; FAILED=2; }
-      echo "=== Daily summary ==="
+      echo "=== Daily summary (refreshes calendar, transcripts, agents) ==="
       bun run summarize --today || { echo "FAILED: summarize"; FAILED=2; }
+      echo "=== Morning briefing (reads fresh DB) ==="
+      bun run briefing || { echo "FAILED: briefing"; FAILED=2; }
       echo "=== Action items ==="
       bun run assess-actions || { echo "FAILED: assess-actions"; FAILED=2; }
+      echo "=== Compliance refresh (current week Tempo + 5/15 snapshot) ==="
+      bun run compliance --fresh || { echo "FAILED: compliance"; FAILED=2; }
       echo "=== Done ==="
       exit $FAILED
     timeout: 3600
@@ -25,14 +27,14 @@ jobs:
       - daily
       - personalized-helper
   afternoon-sync:
-    name: Afternoon Sync — Refresh Meetings
+    name: Afternoon Sync — Refresh Meetings (skip agents)
     schedule: 0 15 * * 1-5
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
       FAILED=0
-      echo "=== Afternoon meeting sync ==="
-      bun run summarize --today || { echo "FAILED: summarize"; FAILED=2; }
+      echo "=== Afternoon meeting sync (agents skipped — morning run handled triage) ==="
+      bun run summarize --today --skip-agents || { echo "FAILED: summarize"; FAILED=2; }
       echo "=== Done ==="
       exit $FAILED
     timeout: 600
@@ -42,7 +44,7 @@ jobs:
       - personalized-helper
   meeting-prep:
     name: Meeting Prep
-    schedule: 0 8 * * 1-5
+    schedule: 45 7 * * 1-5
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     prompt: |
       Check today's calendar for upcoming meetings, then run the relevant prep scripts:
@@ -59,31 +61,32 @@ jobs:
       - daily
       - personalized-helper
       - meetings
-  data-ops:
-    name: Data Ops — GSC Analytics Pipelines
-    schedule: 0 6 * * *
-    directory: /Users/akorinek/Programming/gsc-analytics
-    type: script
-    command: |
-      set -e
-      echo "=== Pingdom import ==="
-      node scripts/import-pingdom.mjs
-      echo "=== CrUX backfill ==="
-      node scripts/backfill-watched-urls.mjs
-      if [ "$(date +%u)" = "1" ]; then
-        echo "=== Lighthouse backfill (Monday) ==="
-        node scripts/backfill-lighthouse.mjs
-      fi
-      echo "=== Done ==="
-    timeout: 3600
-    enabled: false
+  pre-meeting-prep:
+    name: Pre-Meeting Prep — Tomorrow's 1:1s & Skip-Levels
+    schedule: 0 17 * * 0-4
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    prompt: |
+      Generate prep notes for TOMORROW's important meetings so they're ready first thing.
+      Steps:
+      1. Look at tomorrow's calendar (date in America/Los_Angeles or local timezone — use whichever the helper DB stores).
+      2. For each 1:1 meeting on tomorrow's calendar: run `bun run one-on-one` with the relevant person.
+      3. For each skip-level on tomorrow's calendar: run `bun run skip-level`.
+      4. For other named recurring meetings (staff, planning, review): run `bun run prep`.
+      5. Save each prep file into data/summaries/ with tomorrow's date.
+      6. Report what was generated. If tomorrow has no qualifying meetings, just say so.
+      Note: NODE_TLS_REJECT_UNAUTHORIZED=0 should be set for LiteLLM calls.
+    model: sonnet
+    skip_permissions: true
+    timeout: 900
+    enabled: true
     tags:
       - daily
-      - gsc-analytics
-      - data
+      - personalized-helper
+      - meetings
+      - prep
   market-researcher:
     name: Market Research Pipeline
-    schedule: 0 9 * * 1,4
+    schedule: 0 12 * * 1,4
     directory: /Users/akorinek/Programming/market-researcher
     type: script
     command: |
@@ -98,6 +101,29 @@ jobs:
       - periodic
       - twice-weekly
       - market-researcher
+  market-researcher-weekly-baselines:
+    name: Market Researcher — Weekly Baselines (revenue + funnel + category)
+    schedule: 0 7 * * 1
+    directory: /Users/akorinek/Programming/market-researcher
+    type: script
+    command: |
+      FAILED=0
+      echo "=== Revenue baselines (UNAGI) ==="
+      npm run fetch:baselines || { echo "FAILED: fetch:baselines"; FAILED=2; }
+      echo "=== Session funnel ==="
+      npm run fetch:funnel || { echo "FAILED: fetch:funnel"; FAILED=2; }
+      echo "=== Category funnel ==="
+      npm run fetch:category-funnel || { echo "FAILED: fetch:category-funnel"; FAILED=2; }
+      echo "=== Row counts ==="
+      sqlite3 .data/market-researcher.db "SELECT 'revenue_baselines' AS t, COUNT(*) AS rows, MAX(period_end) AS latest FROM revenue_baselines UNION ALL SELECT 'session_funnel_baselines', COUNT(*), MAX(period_end) FROM session_funnel_baselines UNION ALL SELECT 'category_funnel_baselines', COUNT(*), MAX(period_end) FROM category_funnel_baselines;"
+      exit $FAILED
+    timeout: 1800
+    enabled: true
+    tags:
+      - periodic
+      - weekly
+      - market-researcher
+      - bigquery
   executive-review:
     name: Executive Review — Daily Summary
     schedule: 5 18 * * 1-5
@@ -126,28 +152,35 @@ jobs:
       - meta
       - review
   weekly-ops:
-    name: Weekly Ops — Summary & Reports
+    name: Weekly Ops — Summary, Compliance & Decisions
     schedule: 0 7 * * 1
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
+      FAILED=0
       echo "=== Weekly summary ==="
-      bun run summarize --week
+      bun run summarize --week || { echo "FAILED: summarize"; FAILED=2; }
       echo "=== Compliance check (previous week) ==="
-      bun run compliance --fresh
+      bun run compliance --fresh || { echo "FAILED: compliance"; FAILED=2; }
+      echo "=== Decisions digest ==="
+      bun run decisions-digest || { echo "FAILED: decisions-digest"; FAILED=2; }
+      echo "=== Person profiles ==="
+      bun run profile --all || { echo "FAILED: profile"; FAILED=2; }
       echo "=== Done ==="
-    timeout: 600
+      exit $FAILED
+    timeout: 1200
     enabled: true
     tags:
       - weekly
       - personalized-helper
-  thursday-515:
-    name: My 5/15 Draft — Thursday Afternoon
+      - decisions
+  weekly-515-thu:
+    name: My 5/15 Draft — Thursday Early Safety-Net
     schedule: 0 16 * * 4
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
-      echo "=== Generating 5/15 draft ==="
+      echo "=== Generating Thursday 5/15 draft ==="
       bun run compliance --fresh --with-my-515
       echo "=== Done ==="
     timeout: 900
@@ -156,13 +189,13 @@ jobs:
       - weekly
       - personalized-helper
       - five-fifteen
-  friday-515:
-    name: My 5/15 Draft — Friday Afternoon
-    schedule: 30 16 * * 5
+  weekly-515-fri:
+    name: My 5/15 Draft — Friday Multi-Pass (11/14/17)
+    schedule: 0 11,14,17 * * 5
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
-      echo "=== Generating 5/15 draft ==="
+      echo "=== Regenerating Friday 5/15 draft ==="
       bun run compliance --fresh --with-my-515
       echo "=== Done ==="
     timeout: 900
@@ -171,28 +204,36 @@ jobs:
       - weekly
       - personalized-helper
       - five-fifteen
-  friday-compliance:
-    name: Compliance Check — Friday Evening
-    schedule: 0 16,18,20,22 * * 5
+  weekly-515-mon:
+    name: My 5/15 Draft — Monday Settled-SEO Backfill
+    schedule: 0 8 * * 1
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    type: script
+    command: |
+      # UNAGI settles SEO 3.3 revenue ~2 days after week-end, so the Thu/Fri
+      # passes always omit it. Regenerate the just-completed (now-settled) week
+      # on Monday so the SEO business-impact line lands. Targets the most recent
+      # Friday that is at least 2 days old (settled).
+      LAST_FRI=""
+      for i in 2 3 4 5 6 7 8; do
+        if [ "$(date -v-${i}d +%u)" = "5" ]; then LAST_FRI=$(date -v-${i}d +%F); break; fi
+      done
+      echo "=== Backfilling settled 5/15 for week ending $LAST_FRI ==="
+      bun run generate-515 --week "$LAST_FRI"
+      echo "=== Done ==="
+    timeout: 900
+    enabled: true
+    tags:
+      - weekly
+      - personalized-helper
+      - five-fifteen
+  compliance-check:
+    name: Compliance Check — Fri/Sat/Sun
+    schedule: 0 9,15,21 * * 5,6,0
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
       echo "=== Team compliance check ==="
-      bun run compliance --fresh
-      echo "=== Done ==="
-    timeout: 900
-    enabled: true
-    tags:
-      - weekly
-      - personalized-helper
-      - compliance
-  weekend-compliance:
-    name: Compliance Check — Weekend Catch-up
-    schedule: 0 10,18 * * 6,0
-    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
-    type: script
-    command: |
-      echo "=== Team compliance check (weekend catch-up) ==="
       bun run compliance --fresh
       echo "=== Done ==="
     timeout: 900
@@ -231,7 +272,7 @@ jobs:
     model: sonnet
     skip_permissions: true
     timeout: 300
-    enabled: true
+    enabled: false
     tags:
       - daily
       - eod
@@ -429,7 +470,7 @@ jobs:
       - If there are no PRs to review, just report "No unreviewed PRs found"
     model: sonnet
     skip_permissions: true
-    timeout: 900
+    timeout: 1500
     enabled: true
     tags:
       - periodic
@@ -495,15 +536,47 @@ jobs:
         - Flag gaps where the skill instructions are being ignored or misinterpreted
         - Propose skill edits if the instructions are ambiguous
 
-      ## Step 6 — Write report
+      ## Step 6 — Write TWO files
 
-      Save findings to data/research/YYYY-MM-DD-analysis.md with:
+      Save BOTH of these to data/research/ (create the directory if missing):
+
+      ### A) data/research/YYYY-MM-DD-analysis.md
+      Human-readable report with:
         - Executive summary (3-5 bullet points)
         - Metrics table (job, runs, success rate, avg duration)
         - Detailed findings with proposals
         - A prioritized action list (what to fix first)
 
-      Do NOT make any changes to code, config, or skills. Report only.
+      ### B) data/research/YYYY-MM-DD-findings.json
+      Structured findings consumed by the web UI dashboard. STRICT SCHEMA:
+      ```json
+      {
+        "date": "YYYY-MM-DD",
+        "generatedAt": "<ISO 8601 timestamp>",
+        "summary": "<one sentence, e.g. '3 critical, 2 medium, 1 low'>",
+        "totals": { "critical": 0, "high": 0, "medium": 0, "low": 0 },
+        "findings": [
+          {
+            "id": "<kebab-case slug, unique within this report>",
+            "severity": "critical" | "high" | "medium" | "low",
+            "category": "prompt-quality" | "skill-gap" | "timeout" | "error-handling" | "type-mismatch" | "config",
+            "jobId": "<job id this affects, or omit if cross-cutting>",
+            "title": "<short title, < 80 chars>",
+            "currentBehavior": "<what's happening today, 1-2 sentences>",
+            "proposal": "<specific fix, 1-3 sentences>",
+            "expectedImpact": "<what improves, 1 sentence>"
+          }
+        ]
+      }
+      ```
+      Rules for the JSON file:
+        - It MUST be valid JSON (validate before writing — no trailing commas, no comments).
+        - `totals` MUST match the count of `findings` by severity (used for the dashboard badges).
+        - `id` slugs must be unique and stable enough that the markdown can link to `#<id>` anchors.
+        - Match each finding in this JSON to a corresponding section in the markdown report.
+
+      Do NOT make any changes to code, config, or skills. Report only — these two files
+      are the entire output. The web UI at /research surfaces them on the dashboard.
     model: sonnet
     skip_permissions: true
     timeout: 600
@@ -512,3 +585,23 @@ jobs:
       - weekly
       - meta
       - research
+  setup-health:
+    name: Setup Health Audit — Weekly ~/.claude Rot Check
+    schedule: 0 9 * * 1
+    directory: /Users/akorinek/Programming
+    prompt: |
+      Read ~/.claude/skills/setup-health/SKILL.md and follow it exactly, in SCHEDULED mode.
+      - Run all Phase 1 deterministic checks and Phase 2 usage-based checks.
+      - Write the dated report to ~/.claude/health/health-YYYY-MM-DD.md and refresh latest.md.
+      - REPORT ONLY — do not uninstall, disable, or edit any plugin/skill/rule.
+      - End your output with exactly one status line for easy notification:
+        "SETUP-HEALTH: P1 FOUND — <n> issue(s)" if any P1 exists, otherwise
+        "SETUP-HEALTH: CLEAN — P2/P3 only (<n>)".
+    model: sonnet
+    skip_permissions: true
+    timeout: 600
+    enabled: true
+    tags:
+      - weekly
+      - meta
+      - health
