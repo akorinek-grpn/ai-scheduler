@@ -11,6 +11,7 @@ const navItems = [
   { href: "/timeline", label: "Timeline", key: "T" },
   { href: "/jobs", label: "Jobs", key: "J" },
   { href: "/runs", label: "Runs", key: "R" },
+  { href: "/research", label: "Research", key: "X" },
   { href: "/config", label: "Config", key: "C" },
 ];
 
@@ -43,7 +44,16 @@ export function Sidebar(): React.ReactElement {
         className="fixed top-2 left-2 z-40 flex h-8 w-8 items-center justify-center rounded bg-secondary md:hidden"
         aria-label="Open navigation"
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
           <path d="M3 6h18M3 12h18M3 18h18" />
         </svg>
       </button>
@@ -70,7 +80,9 @@ export function Sidebar(): React.ReactElement {
       >
         {/* Logo */}
         <div className="flex items-center gap-2 px-3 py-3 border-b border-border">
-          <span className="font-mono text-[11px] font-bold tracking-tight text-primary">AI:SCHED</span>
+          <span className="font-mono text-[11px] font-bold tracking-tight text-primary">
+            AI:SCHED
+          </span>
         </div>
 
         {/* Nav */}
@@ -88,7 +100,9 @@ export function Sidebar(): React.ReactElement {
                     : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
                 }`}
               >
-                <span className="font-mono text-[10px] text-muted-foreground w-3">{item.key}</span>
+                <span className="font-mono text-[10px] text-muted-foreground w-3">
+                  {item.key}
+                </span>
                 {item.label}
               </Link>
             );
@@ -108,16 +122,32 @@ export function Sidebar(): React.ReactElement {
                   : "Enable notifications"
             }
           >
-            <span className={`text-[10px] ${permission === "granted" ? "text-foreground" : "text-muted-foreground"}`}>
-              {permission === "granted" ? "\u266A" : permission === "denied" ? "\u2715" : "\u25CB"}
+            <span
+              className={`text-[10px] ${permission === "granted" ? "text-foreground" : "text-muted-foreground"}`}
+            >
+              {permission === "granted"
+                ? "\u266A"
+                : permission === "denied"
+                  ? "\u2715"
+                  : "\u25CB"}
             </span>
             <span className="text-[11px] text-muted-foreground">
-              {permission === "granted" ? "Notifs on" : permission === "denied" ? "Blocked" : "Notifications"}
+              {permission === "granted"
+                ? "Notifs on"
+                : permission === "denied"
+                  ? "Blocked"
+                  : "Notifications"}
             </span>
           </button>
 
-          <div className="flex items-center gap-2 px-1" role="status" aria-label={health ? "Daemon running" : "Daemon offline"}>
-            <div className={`h-1.5 w-1.5 rounded-full ${health ? "bg-green-500" : "bg-muted-foreground/50"}`} />
+          <div
+            className="flex items-center gap-2 px-1"
+            role="status"
+            aria-label={health ? "Daemon running" : "Daemon offline"}
+          >
+            <div
+              className={`h-1.5 w-1.5 rounded-full ${health ? "bg-green-500" : "bg-muted-foreground/50"}`}
+            />
             <span className="text-[11px] font-mono text-muted-foreground">
               {health ? `pid ${health.pid}` : "offline"}
             </span>

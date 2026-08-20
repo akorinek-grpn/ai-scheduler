@@ -72,10 +72,26 @@ export class CronEngine {
         projectRoot: this.projectRoot,
         trigger: "scheduled",
         defaultTimeout: config.defaults.timeout,
+        maxRetries: jobConfig.max_retries ?? config.defaults.max_retries,
       });
-      console.log(`[cron] Completed ${jobId}: ${result.status}`);
-      evaluateRun(this.projectRoot, jobId, result.runId, jobConfig.name, result.status, result.exitCode)
-        .catch((err) => console.error(`[eval] ${jobId}: evaluation failed:`, err));
+      if (result.status === "success") {
+        console.log(`[cron] Completed ${jobId}: success`);
+      } else {
+        // stderr so failures stand out in daemon.log and can be grepped/acted on
+        console.error(
+          `[cron] Completed ${jobId}: ${result.status} (exit code ${result.exitCode}) - see data/runs/${jobId}/${result.runId}/output.log`,
+        );
+      }
+      evaluateRun(
+        this.projectRoot,
+        jobId,
+        result.runId,
+        jobConfig.name,
+        result.status,
+        result.exitCode,
+      ).catch((err) =>
+        console.error(`[eval] ${jobId}: evaluation failed:`, err),
+      );
       pruneOldRuns(this.projectRoot, jobId, config.defaults.retain_runs);
     } catch (err) {
       console.error(`[cron] Error running ${jobId}:`, err);
@@ -85,7 +101,9 @@ export class CronEngine {
     }
   }
 
-  async triggerJob(jobId: string): Promise<{ runId: string } | { error: string }> {
+  async triggerJob(
+    jobId: string,
+  ): Promise<{ runId: string } | { error: string }> {
     if (!this.currentConfig) {
       return { error: "No config loaded" };
     }
@@ -108,11 +126,25 @@ export class CronEngine {
         projectRoot: this.projectRoot,
         trigger: "manual",
         defaultTimeout: this.currentConfig.defaults.timeout,
+        maxRetries:
+          jobConfig.max_retries ?? this.currentConfig.defaults.max_retries,
       });
-      evaluateRun(this.projectRoot, jobId, result.runId, jobConfig.name, result.status, result.exitCode)
-        .catch((err) => console.error(`[eval] ${jobId}: evaluation failed:`, err));
+      evaluateRun(
+        this.projectRoot,
+        jobId,
+        result.runId,
+        jobConfig.name,
+        result.status,
+        result.exitCode,
+      ).catch((err) =>
+        console.error(`[eval] ${jobId}: evaluation failed:`, err),
+      );
       if (this.currentConfig) {
-        pruneOldRuns(this.projectRoot, jobId, this.currentConfig.defaults.retain_runs);
+        pruneOldRuns(
+          this.projectRoot,
+          jobId,
+          this.currentConfig.defaults.retain_runs,
+        );
       }
       return { runId: result.runId };
     } finally {
@@ -136,7 +168,8 @@ export class CronEngine {
     if (!this.currentConfig) return { error: "No config loaded" };
     const jobConfig = this.currentConfig.jobs[jobId];
     if (!jobConfig) return { error: `Job not found: ${jobId}` };
-    if (this.activeJobs.has(jobId)) return { error: `Job already running: ${jobId}` };
+    if (this.activeJobs.has(jobId))
+      return { error: `Job already running: ${jobId}` };
 
     this.activeJobs.add(jobId);
     try {
@@ -147,10 +180,24 @@ export class CronEngine {
         trigger: "catchup",
         catchupFor: missedSlot.toISOString(),
         defaultTimeout: this.currentConfig.defaults.timeout,
+        maxRetries:
+          jobConfig.max_retries ?? this.currentConfig.defaults.max_retries,
       });
-      evaluateRun(this.projectRoot, jobId, result.runId, jobConfig.name, result.status, result.exitCode)
-        .catch((err) => console.error(`[eval] ${jobId}: evaluation failed:`, err));
-      pruneOldRuns(this.projectRoot, jobId, this.currentConfig.defaults.retain_runs);
+      evaluateRun(
+        this.projectRoot,
+        jobId,
+        result.runId,
+        jobConfig.name,
+        result.status,
+        result.exitCode,
+      ).catch((err) =>
+        console.error(`[eval] ${jobId}: evaluation failed:`, err),
+      );
+      pruneOldRuns(
+        this.projectRoot,
+        jobId,
+        this.currentConfig.defaults.retain_runs,
+      );
       return { runId: result.runId };
     } finally {
       this.activeJobs.delete(jobId);

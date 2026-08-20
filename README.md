@@ -101,7 +101,7 @@ version: 1
 
 defaults:
   timeout: 300        # seconds per job
-  max_retries: 0
+  max_retries: 0      # extra attempts on failed/partial runs (timeouts are never retried)
   retain_runs: 50     # how many runs to keep per job
 
 jobs:

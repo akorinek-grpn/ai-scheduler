@@ -127,7 +127,7 @@ version: 1
 
 defaults:
   timeout: 600        # seconds
-  max_retries: 0
+  max_retries: 0      # extra attempts on failed/partial runs (timeouts are never retried)
   retain_runs: 30
 
 jobs:

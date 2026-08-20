@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What This Is
 
 A local tool for scheduling and monitoring Claude CLI runs across multiple projects. Three components:
+
 1. **Scheduler Daemon** (Node.js, port 3501) — manages cron schedules, spawns jobs, exposes REST API
 2. **Web UI** (Next.js, port 3500) — dashboard for viewing jobs, runs, and live logs
 3. **Claude Code Skill** (`/ai-scheduler`) — conversational interface for job management
@@ -78,7 +79,7 @@ Vitest with globals enabled. Tests in `src/daemon/__tests__/` and `src/shared/__
 version: 1
 defaults:
   timeout: 300          # seconds
-  max_retries: 0        # schema exists but not implemented
+  max_retries: 0        # extra attempts on failed/partial runs (timeouts are never retried)
   retain_runs: 50
 jobs:
   job-id:

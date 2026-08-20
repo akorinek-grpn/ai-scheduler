@@ -1,7 +1,14 @@
 import { spawn } from "child_process";
 import fs from "fs";
 import crypto from "crypto";
-import type { JobConfig, TriggerType, RunMeta, RunStatus, RunStatusFile, RunStats } from "@shared/types";
+import type {
+  JobConfig,
+  TriggerType,
+  RunMeta,
+  RunStatus,
+  RunStatusFile,
+  RunStats,
+} from "@shared/types";
 import {
   getRunDir,
   getLogPath,
@@ -20,6 +27,10 @@ interface RunJobOptions {
   args?: string[];
   defaultTimeout?: number;
   catchupFor?: string;
+  /** Grace period (ms) after SIGTERM before escalating to SIGKILL on timeout. Default 5000. */
+  sigkillGraceMs?: number;
+  /** Extra attempts after the first if the run does not succeed. Default 0 (no retries). */
+  maxRetries?: number;
 }
 
 interface RunResult {
@@ -61,7 +72,10 @@ function formatToolInput(name: string, input: Record<string, unknown>): string {
 function truncate(text: string, maxLines: number): string {
   const lines = text.split("\n");
   if (lines.length <= maxLines) return text;
-  return lines.slice(0, maxLines).join("\n") + `\n... (${lines.length - maxLines} more lines)`;
+  return (
+    lines.slice(0, maxLines).join("\n") +
+    `\n... (${lines.length - maxLines} more lines)`
+  );
 }
 
 export function countToolUseInStreamEvent(line: string): string[] {
@@ -151,7 +165,16 @@ function extractTextFromStreamJson(line: string): string | null {
 }
 
 export async function runJob(options: RunJobOptions): Promise<RunResult> {
-  const { jobId, jobConfig, projectRoot, trigger, defaultTimeout = 300, catchupFor } = options;
+  const {
+    jobId,
+    jobConfig,
+    projectRoot,
+    trigger,
+    defaultTimeout = 300,
+    catchupFor,
+    sigkillGraceMs = 5000,
+    maxRetries = 0,
+  } = options;
   const runId = generateRunId();
   const runDir = getRunDir(projectRoot, jobId, runId);
 
@@ -165,7 +188,10 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
     startedAt: new Date().toISOString(),
     ...(catchupFor !== undefined ? { catchupFor } : {}),
   };
-  fs.writeFileSync(getMetaPath(projectRoot, jobId, runId), JSON.stringify(meta, null, 2));
+  fs.writeFileSync(
+    getMetaPath(projectRoot, jobId, runId),
+    JSON.stringify(meta, null, 2),
+  );
 
   const statusFile: RunStatusFile = {
     status: "running",
@@ -173,7 +199,10 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
     startedAt: meta.startedAt,
     finishedAt: null,
   };
-  fs.writeFileSync(getStatusPath(projectRoot, jobId, runId), JSON.stringify(statusFile, null, 2));
+  fs.writeFileSync(
+    getStatusPath(projectRoot, jobId, runId),
+    JSON.stringify(statusFile, null, 2),
+  );
 
   const logPath = getLogPath(projectRoot, jobId, runId);
   const logStream = fs.createWriteStream(logPath, { flags: "a" });
@@ -196,14 +225,16 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
     args = [
       "-p",
       "--verbose",
-      "--output-format", "stream-json",
+      "--output-format",
+      "stream-json",
       ...(jobConfig.skip_permissions ? ["--dangerously-skip-permissions"] : []),
       ...(jobConfig.model ? ["--model", jobConfig.model] : []),
       jobConfig.prompt!,
     ];
   }
 
-  const isCustomCommand = isScript || options.command !== undefined || options.args !== undefined;
+  const isCustomCommand =
+    isScript || options.command !== undefined || options.args !== undefined;
 
   const timeout = jobConfig.timeout ?? defaultTimeout;
 
@@ -220,114 +251,150 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
     );
   };
 
-  return new Promise<RunResult>((resolve) => {
-    const child = spawn(command, args, {
-      cwd: jobConfig.directory,
-      env: { ...process.env },
-      stdio: ["ignore", "pipe", "pipe"],
+  // Run the child process once. Resolves with the computed status/exit code
+  // but does NOT finalize the run record, so runJob can retry before committing
+  // the final status + latest symlink. The shared logStream stays open across
+  // attempts (piped with `end: false`) and is closed once during finalization.
+  const runAttempt = (): Promise<{
+    status: RunStatus;
+    exitCode: number | null;
+  }> =>
+    new Promise((resolve) => {
+      const child = spawn(command, args, {
+        cwd: jobConfig.directory,
+        env: { ...process.env },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      if (isCustomCommand) {
+        // For test commands (echo, sh, etc.) - pipe directly
+        child.stdout.pipe(logStream, { end: false });
+      } else {
+        // For claude with stream-json - parse events and extract text
+        let buffer = "";
+        child.stdout.on("data", (chunk: Buffer) => {
+          buffer += chunk.toString();
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            const text = extractTextFromStreamJson(trimmed);
+            if (text) {
+              logStream.write(text);
+            }
+            for (const name of countToolUseInStreamEvent(trimmed)) {
+              toolCalls += 1;
+              toolsByName[name] = (toolsByName[name] ?? 0) + 1;
+            }
+          }
+        });
+      }
+
+      child.stderr.pipe(logStream, { end: false });
+
+      let isTimedOut = false;
+      let processExited = false;
+      let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
+      const timer = setTimeout(() => {
+        isTimedOut = true;
+        child.kill("SIGTERM");
+        // `child.killed` only reflects that a signal was *sent*, not that the
+        // process died. A child that ignores SIGTERM (e.g. a hung `claude -p`)
+        // would otherwise never be escalated to SIGKILL. Track real exit instead.
+        sigkillTimer = setTimeout(() => {
+          if (!processExited) child.kill("SIGKILL");
+        }, sigkillGraceMs);
+      }, timeout * 1000);
+
+      child.on("close", (code) => {
+        processExited = true;
+        clearTimeout(timer);
+        if (sigkillTimer) clearTimeout(sigkillTimer);
+
+        const status: RunStatus = isTimedOut
+          ? "timeout"
+          : code === 0
+            ? "success"
+            : code === 2
+              ? "partial"
+              : "failed";
+        resolve({ status, exitCode: code });
+      });
+
+      child.on("error", (err) => {
+        processExited = true;
+        clearTimeout(timer);
+        if (sigkillTimer) clearTimeout(sigkillTimer);
+        logStream.write(`\nProcess error: ${err.message}\n`);
+        resolve({ status: "failed", exitCode: null });
+      });
     });
 
-    if (isCustomCommand) {
-      // For test commands (echo, sh, etc.) — pipe directly
-      child.stdout.pipe(logStream);
-    } else {
-      // For claude with stream-json — parse events and extract text
-      let buffer = "";
-      child.stdout.on("data", (chunk: Buffer) => {
-        buffer += chunk.toString();
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          const text = extractTextFromStreamJson(trimmed);
-          if (text) {
-            logStream.write(text);
-          }
-          for (const name of countToolUseInStreamEvent(trimmed)) {
-            toolCalls += 1;
-            toolsByName[name] = (toolsByName[name] ?? 0) + 1;
-          }
-        }
-      });
+  // Retry until success or attempts are exhausted. Only failed / partial are
+  // retryable - transient failures like the weekly-ops LiteLLM socket error
+  // recover on a later attempt. A timeout is NOT retried: the attempt used its
+  // full time budget doing real work (possibly with side effects, e.g. PR
+  // comments already posted), so a rerun duplicates work and burns another
+  // maxRetries x timeout of wall-clock for nothing.
+  let result: { status: RunStatus; exitCode: number | null } = {
+    status: "failed",
+    exitCode: null,
+  };
+  let attemptsRun = 0;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      logStream.write(
+        `\n=== retry ${attempt}/${maxRetries} (previous attempt: ${result.status}) ===\n`,
+      );
     }
-
-    child.stderr.pipe(logStream);
-
-    let isTimedOut = false;
-    const timer = setTimeout(() => {
-      isTimedOut = true;
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        if (!child.killed) child.kill("SIGKILL");
-      }, 5000);
-    }, timeout * 1000);
-
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      logStream.end();
-
-      const resolvedStatus: RunStatus = isTimedOut
-        ? "timeout"
-        : code === 0
-          ? "success"
-          : code === 2
-            ? "partial"
-            : "failed";
-      const finalStatus: RunStatusFile = {
-        status: resolvedStatus,
-        exitCode: code,
-        startedAt: meta.startedAt,
-        finishedAt: new Date().toISOString(),
-      };
-      fs.writeFileSync(
-        getStatusPath(projectRoot, jobId, runId),
-        JSON.stringify(finalStatus, null, 2),
+    result = await runAttempt();
+    attemptsRun += 1;
+    if (result.status === "success") break;
+    if (result.status === "timeout") {
+      logStream.write(
+        `\n=== run timed out after ${timeout}s and was killed. Not retrying: ` +
+          `a timed-out run spent its full time budget and may already have side ` +
+          `effects; raise 'timeout' in scheduler.yaml if this job needs more time. ===\n`,
       );
-      writeStats();
+      break;
+    }
+  }
+  if (result.status === "failed" || result.status === "partial") {
+    logStream.write(
+      `\n=== giving up after ${attemptsRun} attempt${attemptsRun === 1 ? "" : "s"}: ` +
+        `final status ${result.status} (exit code ${result.exitCode}) ===\n`,
+    );
+  }
 
-      const symlinkPath = getLatestSymlink(projectRoot, jobId);
-      try {
-        fs.unlinkSync(symlinkPath);
-      } catch {
-        // symlink doesn't exist yet
-      }
-      fs.symlinkSync(runId, symlinkPath);
+  // Finalize the run record once, after all attempts. Wait for the log to
+  // flush so callers reading output.log see the complete content.
+  await new Promise<void>((res) => logStream.end(res));
 
-      resolve({
-        runId,
-        status: finalStatus.status as RunResult["status"],
-        exitCode: code,
-      });
-    });
+  const finalStatus: RunStatusFile = {
+    status: result.status,
+    exitCode: result.exitCode,
+    startedAt: meta.startedAt,
+    finishedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(
+    getStatusPath(projectRoot, jobId, runId),
+    JSON.stringify(finalStatus, null, 2),
+  );
+  writeStats();
 
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      logStream.write(`\nProcess error: ${err.message}\n`);
-      logStream.end();
+  const symlinkPath = getLatestSymlink(projectRoot, jobId);
+  try {
+    fs.unlinkSync(symlinkPath);
+  } catch {
+    // symlink doesn't exist yet
+  }
+  fs.symlinkSync(runId, symlinkPath);
 
-      const finalStatus: RunStatusFile = {
-        status: "failed",
-        exitCode: null,
-        startedAt: meta.startedAt,
-        finishedAt: new Date().toISOString(),
-      };
-      fs.writeFileSync(
-        getStatusPath(projectRoot, jobId, runId),
-        JSON.stringify(finalStatus, null, 2),
-      );
-      writeStats();
-
-      const symPath = getLatestSymlink(projectRoot, jobId);
-      try {
-        fs.unlinkSync(symPath);
-      } catch {
-        // noop
-      }
-      fs.symlinkSync(runId, symPath);
-
-      resolve({ runId, status: "failed", exitCode: null });
-    });
-  });
+  return {
+    runId,
+    status: result.status as RunResult["status"],
+    exitCode: result.exitCode,
+  };
 }

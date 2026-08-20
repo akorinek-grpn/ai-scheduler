@@ -95,7 +95,10 @@ jobs:
       echo "=== Output verification ==="
       echo "Reports:" && ls -lh reports/*.{html,json} 2>/dev/null || echo "(none)"
       echo "Markfiles:" && ls -lh .data/ 2>/dev/null || echo "(none)"
-    timeout: 1800
+    # 1800s was tuned when every LLM call failed fast against the LiteLLM auth
+    # gate. On the Anthropic API the pipeline does real work (grounded web
+    # search + per-stage LLM analysis) and needs ~35 min end to end.
+    timeout: 3600
     enabled: true
     tags:
       - periodic
@@ -103,7 +106,10 @@ jobs:
       - market-researcher
   market-researcher-weekly-baselines:
     name: Market Researcher — Weekly Baselines (revenue + funnel + category)
-    schedule: 0 7 * * 1
+    # 06:00, not 07:00: this BigQuery job can run ~30 min, and weekly-ops (Mon
+    # 07:00) is also heavy. Starting at 06:00 gives a full clear hour so the two
+    # don't contend for the machine at the same instant.
+    schedule: 0 6 * * 1
     directory: /Users/akorinek/Programming/market-researcher
     type: script
     command: |
@@ -227,6 +233,51 @@ jobs:
       - weekly
       - personalized-helper
       - five-fifteen
+  weekly-515-coaching:
+    name: 5/15 Coaching Drafts - Mon Review Queue (Tue safety-net)
+    schedule: 30 8 * * 1,2
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    type: script
+    command: |
+      # Reads the directs' 5/15s and queues one draft comment per direct for
+      # review. POSTS NOTHING: every draft waits on
+      # http://localhost:3847/five-fifteens/review for Adam to read, edit, send.
+      #
+      # Runs Monday AND Tuesday 08:30. The Tuesday pass is a safety-net: if
+      # Monday failed (LiteLLM/Asana down, machine asleep) it fills the queue a
+      # day late instead of leaving a whole week with no drafts. When Monday
+      # succeeded, Tuesday is a no-op - insertDraftIfAbsent skips any (person,
+      # week) that already has a row in ANY status (pending/posted/dismissed),
+      # so an edited or dismissed draft is never clobbered or resurrected.
+      echo "=== Drafting 5/15 coaching comments ==="
+      bun run coach-515
+      echo "=== Done ==="
+    timeout: 900
+    enabled: true
+    tags:
+      - weekly
+      - personalized-helper
+      - five-fifteen
+  weekly-self-coach:
+    name: Self-Coach - Friday Check-in for /me
+    schedule: 30 16 * * 5
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    type: script
+    command: |
+      # Builds Adam's weekly ledger (commitment follow-through, coaching
+      # cadence, attribution, ticket traceability, talk share, maker ratio),
+      # drafts the coach check-in, and appends it for http://localhost:3847/me.
+      # Writes ONLY to the local DB - no Asana, no email, no chat. Runs after
+      # afternoon-sync (15:00) so transcripts and the week's 5/15 are cached.
+      echo "=== Weekly self-coach ==="
+      bun run coach-me
+      echo "=== Done ==="
+    timeout: 900
+    enabled: true
+    tags:
+      - weekly
+      - personalized-helper
+      - self-coach
   compliance-check:
     name: Compliance Check — Fri/Sat/Sun
     schedule: 0 9,15,21 * * 5,6,0
@@ -279,204 +330,87 @@ jobs:
       - reporting
   babysit-prs:
     name: Babysit PRs — Auto-Review Open PRs
-    schedule: 0 6,8,10,12,14,16,18,20,22 * * 1-5
+    schedule: 0 6-22 * * 1-5
     directory: /Users/akorinek/Programming/ai-scheduler
     prompt: |
-      Review open PRs on configured repos. For each PR that needs review,
-      read and follow ~/.claude/skills/pr-review/SKILL.md exactly.
+      ## FIRST, BEFORE ANYTHING ELSE: check the autopilot-daily lock
 
-      ## Repos to check — with host-specific "my username" pinned per repo
-      - groupon/echelon (github.com) — my username: akorinek-grpn — all open PRs
-      - Mobile-Next/next-pwa-app (github.groupondev.com) — my username: akorinek — only PRs with label "SEO"
+      Run: `cat ~/.autopilot-daily.lock 2>/dev/null`
 
-      ## CRITICAL: host → username mapping
-      | Host | My username | Self-review filter (author login to skip) | Prior-review filter (reviewer login) |
-      |---|---|---|---|
-      | github.com | akorinek-grpn | akorinek-grpn | akorinek-grpn |
-      | github.groupondev.com | akorinek | akorinek | akorinek |
+      If that file exists AND its `startedAt` epoch-milliseconds value is less
+      than 120 minutes old, the autopilot-daily job is mid-run and holds the
+      machine. In that case print exactly:
+        "Deferred - autopilot-daily holds the lock"
+      and STOP immediately. Do not review any PRs, do not call any other tool.
+      You will run again next hour.
 
-      These are DIFFERENT accounts. Using the wrong one returns zero hits from the reviews API
-      and causes duplicate reviews on the same HEAD commit (this happened to
-      groupon/echelon PR #285 on 2026-04-16 — two reviews 8h apart on the same SHA).
-      For every `select(.user.login == "<X>")` filter you construct, pick `<X>` from the
-      table above based on which host the repo lives on. Do not rely on config.json's
-      single `github_username` field (that's the GHE one only).
+      If the file is absent, unparseable, or older than 120 minutes, ignore it and
+      proceed normally with the review work below.
 
-      ## For each repo above:
-      1. List open, non-draft PRs:
-         - For github.com repos:
-           ```
-           gh pr list --repo <repo> --state open --json number,title,author,createdAt,isDraft,labels --limit 10
-           ```
-         - For GHE repos (github.groupondev.com):
-           ```
-           GH_HOST=github.groupondev.com gh pr list --repo <repo> --state open --json number,title,author,createdAt,isDraft,labels --limit 10
-           ```
-      2. Filter out drafts and PRs authored by ME (self-review filter from the table
-         above — use `akorinek-grpn` on github.com, `akorinek` on github.groupondev.com).
-      3. If the repo has a label filter (e.g., "SEO"), additionally filter to only PRs that have that label.
-      4. For each remaining PR (oldest first), decide whether to review.
+      ## Normal review work
 
-         a. Fetch my FULL review history on this PR (not just last review) — USING THE
-            HOST-CORRECT USERNAME from the table. We need the full array because an
-            earlier approval must stick even if later runs flipped the state:
-            ```
-            # github.com example:
-            gh api repos/<repo>/pulls/<number>/reviews --jq '[.[] | select(.user.login == "akorinek-grpn")] | sort_by(.submitted_at) | map({state, submitted_at, commit_id: .commit_id[0:8]})'
-            # GHE example:
-            GH_HOST=github.groupondev.com gh api repos/<repo>/pulls/<number>/reviews --jq '[.[] | select(.user.login == "akorinek")] | sort_by(.submitted_at) | map({state, submitted_at, commit_id: .commit_id[0:8]})'
-            ```
-            From that array, compute three values:
-            - `ever_approved`: `true` if ANY review has state == "APPROVED".
-            - `latest`: the last element (most recent review), or null if the array is empty.
-            - `latest_state`, `latest_commit`, `latest_age_hours`: fields of `latest`.
+      STEP 1 - run the deterministic preflight gate. Your FIRST action is:
 
-         b. Get the current HEAD SHA:
-            ```
-            gh pr view <number> --repo <repo> --json headRefOid --jq '.headRefOid'
-            ```
+        bash ~/.claude/skills/pr-review/scripts/batch-preflight.sh
 
-         c. Decision ladder — evaluate in this order and take the FIRST match:
-            1. **`ever_approved == true`** → **skip** ("already approved by this account —
-               once we've approved a PR, we do NOT review it again, even if new commits
-               land. Human reviewers take over from there."). This is an **unconditional
-               terminal state** — it overrides cooldown, HEAD-change, and re-review rules.
-               If the author pushes destructive changes after our approval, they need a
-               human reviewer anyway, not another bot pass.
-            2. **No prior review** → **review this PR** (first-time).
-            3. **Head SHA == latest.commit_id** → **skip** ("already reviewed at current HEAD,
-               no new commits").
-            4. **Head SHA != latest.commit_id AND latest_age_hours < 4** → **skip** with
-               reason "cooldown (Nh ago, reviewing again at T+4h)". Computes age with
-               `(now - submitted_at_iso) / 3600`. Prevents tight re-review loops on
-               rapidly-churning branches.
-            5. **Head SHA != latest.commit_id AND latest_age_hours ≥ 4** → **re-review**
-               (new commits, cooldown passed, not previously approved).
+      It performs per-host auth checks, PR discovery, the full decision ladder,
+      budget selection, and writes the batch decision telemetry itself. Read its
+      final "PREFLIGHT_RESULT_JSON:" line:
 
-         d. ALWAYS log the decision line, even on skip — so drift is debuggable:
-            ```
-            PR <repo>#<n>: head=<sha8> prior=<sha8> ever_approved=<true|false> latest_state=<S> age=<Xh> decision=<skip|review|re-review> reason=<"approved"|"same-HEAD"|"cooldown"|"new-commits"|"first-time">
-            ```
+      - candidates EMPTY -> print the script's decision lines and summary as your
+        run output and STOP. Do NOT read SKILL.md, do NOT call any other tool.
+        This is the expected outcome of most runs.
+      - candidates NON-EMPTY -> proceed to STEP 2 for exactly those PRs.
+      - exit code 2 -> a host was unreachable/unauthenticated. Say WHICH host
+        prominently in your summary (this must never look like "no PRs found"),
+        then still process any candidates that were emitted.
 
-         For GHE repos, prefix all gh commands with GH_HOST=github.groupondev.com.
-      5. For PRs that need review:
-         a. Read ~/.claude/skills/pr-review/SKILL.md
-         b. Follow ALL steps in that skill file with --auto flag behavior:
-            - Steps 1-6: fetch PR, filter files, understand intent, deep review, build findings
-            - Step 7: generate the review summary with verdict
-            - Step 8: POST THE REVIEW VIA `gh api ... /reviews` with the STRICT INLINE CONTRACT below.
-            - Auto-approve logic (--auto mode):
-              * 0 critical + 0 important findings → event: "APPROVE"
-              * 0 critical + 1+ important → event: "COMMENT"
-              * 1+ critical → event: "REQUEST_CHANGES"
-            - Re-review: if prior review exists, diff only new commits and don't duplicate prior comments
+      STEP 2 - review the preflight candidates by following
+      ~/.claude/skills/pr-review/SKILL.md EXACTLY, in scheduled/batch mode with
+      --auto behavior, starting at Step 0.5 (discovery and the decision ladder
+      already ran in preflight - do not re-derive or second-guess skip
+      decisions). The skill is the single source of truth for: the trivial-delta
+      fast path, pagination discipline (--paginate on every reviews/comments
+      list call), the posting contract (inline comments, short structural body,
+      422 re-anchor rules), the auto-approve confidence gate, and telemetry
+      (schema v2 per-PR files AND appending to the {date}-batch.json runs[]
+      decision log). Repos, label filters, and cooldown come from the skill's
+      config.json (scheduled_mode section).
 
-         ## STRICT INLINE-COMMENT CONTRACT
+      ## CRITICAL: host -> username mapping (identity only; all logic lives in the skill)
+      | Host | My username (self-review filter AND prior-review filter) |
+      |---|---|
+      | github.com | akorinek-grpn |
+      | github.groupondev.com | akorinek |
 
-         The biggest historical failure mode of this job is posting reviews with
-         `"comments": []` and dumping every finding into the `body` as prose.
-         That produces a wall-of-text review with nothing tagged to actual code,
-         which is useless. You MUST NOT do this. Rules:
+      These are DIFFERENT accounts. For every `select(.user.login == ...)` filter,
+      pick the login from this table by the repo's host. Using the wrong one
+      silently returns zero hits and causes duplicate reviews on the same HEAD
+      (groupon/echelon#285, 2026-04-16).
 
-         1. **Every finding that references a specific file or code location MUST
-            be an inline comment**, not a `body` bullet. A finding like
-            "in `queries/teams.ts` line ~3796 the query uses COUNT where users uses
-            SUM" → inline comment on that file at a line near that finding. A
-            finding like "PR is missing a CHANGELOG entry" has no code location →
-            that one may stay in `body` under "### Process".
-
-         2. **The `body` field is short and structural**, containing ONLY:
-            - Verdict line ("Comment" / "Approve" / "Request Changes")
-            - Scope line (files, +added/-removed)
-            - Risk line (Low/Medium/High + 1-sentence why)
-            - "### Summary" — 1-2 sentences on what the PR does
-            - "### Strengths" — 2-4 bullet praise lines
-            - "### Issues Found" — counts per severity ONLY (e.g., "2 critical, 3 important, 1 minor"). NO finding bodies here.
-            - Optional "### Process" for things with no code location
-            Target: body length under ~2500 characters. If it's longer, you're
-            putting finding details in the body — move them inline.
-
-         3. **Before calling `gh api`, self-validate the payload**:
-            - If `comments.length == 0` AND there's any finding that mentions a
-              file path → you made the mistake above. STOP, reconstruct, and move
-              those findings into `comments` with valid line numbers. Do NOT post.
-            - If `body` contains `[Critical]`, `[Important]`, or `[Minor]` headers
-              followed by multi-line detail → same mistake. Move the detail into
-              inline `comments` and leave only the severity count in the body.
-
-         4. **How to pick a valid line number** (this is where people fail and then
-            give up and stuff everything into the body — don't):
-            a. Get the diff with hunks: `gh pr diff <N> --repo <repo>` (or
-               `GH_HOST=... gh pr diff ...` on GHE).
-            b. Each file block has `@@ -a,b +c,d @@` hunk headers. The `+c,d` part
-               tells you that the new file's hunk starts at line `c` and spans `d`
-               lines. ANY line from `c` to `c+d-1` is legal for `side: "RIGHT"`.
-            c. For brand-new files, the diff header is `@@ -0,0 +1,N @@` — any
-               line 1..N is legal.
-            d. For multi-line annotations, `start_line` and `line` must both sit
-               inside the SAME hunk on the same side.
-            e. Prefer lines that are additions (`+` prefix in the diff). Context
-               lines (space prefix) within a hunk also work.
-            f. If you can't pin the finding to one exact line, pick the nearest
-               `+` line in that file's hunks. A comment near the code beats a
-               comment buried in prose.
-
-         5. **Comment body format** — each inline comment body begins with a
-            severity prefix and may include a GitHub `suggestion` block for
-            concrete fixes:
-            ```
-            **[Critical]** <one-sentence summary>
-
-            <1-3 sentences explaining why it matters>
-
-            ```suggestion
-            <corrected code>
-            ```
-            ```
-
-         6. **Posting mechanics**:
-            - HEAD SHA: `gh pr view <N> --repo <repo> --json headRefOid --jq '.headRefOid'`
-            - Write payload to `/tmp/pr-<N>-review.json` via `cat > ... << 'EOF'`
-            - Post with: `gh api repos/<repo>/pulls/<N>/reviews --method POST --input /tmp/pr-<N>-review.json`
-            - On GHE, prefix with `GH_HOST=github.groupondev.com`.
-
-         7. **On 422 error** ("Pull request review thread line must be part of the
-            diff"): the ONLY correct response is to pick a different line that IS
-            in the diff. DO NOT fall back to posting a review with
-            `comments: []` and all findings in the body. If 2-3 attempts fail on
-            the same finding, drop THAT finding entirely (log it to stdout) and
-            post the remaining inline comments. A review with 3 of 5 inline is
-            still better than a review with 0 inline.
-
-         8. **Self-audit log line** after posting: print
-            `POSTED <repo>#<N>: body_len=<X> inline_comments=<Y> event=<E>`.
-            If Y == 0 and there were file-specific findings, that's a bug — surface
-            it in the final summary so it's visible.
-
-      6. After processing all repos, print a summary:
-         - PRs reviewed (first time): [list with numbers and titles, inline_comments count]
-         - PRs re-reviewed (new commits): [list with inline_comments count]
-         - PRs skipped (already approved by this account): [list with reason]
-         - PRs skipped (up to date at HEAD): [list]
-         - PRs skipped (cooldown): [list with hours remaining]
-         - PRs skipped (draft/self-authored): [list]
-         - **Any review posted with 0 inline comments and file-specific findings**: flag as bug
-
-      ## Important
-      - ALWAYS post via gh api with inline comments — never just print the review to stdout
-      - ALWAYS use the approve/comment/request-changes logic based on finding severity
-      - If the 422-retry loop exhausts, drop the specific finding rather than collapsing to a body-only review
-      - If a PR review fails entirely, log the error and continue to the next one
-      - If there are no PRs to review, just report "No unreviewed PRs found"
+      ## Job-runner specifics (things the skill does not cover)
+      - If a github.groupondev.com call fails to connect, retry once after 15s.
+        Still failing: log "GHE unreachable - skipped <repo>" in the summary and
+        continue with the remaining repos; do NOT fail the whole run.
+      - Do not invoke unrelated skills (hello, session bootstrap, reporting,
+        etc.) - go straight to the review work.
+      - If a single PR review fails, log the error and continue to the next PR.
+      - If there are no PRs to review, report "No unreviewed PRs found".
+      - ALWAYS print the per-PR decision lines and the batch summary table from
+        the skill's batch-mode section, even when everything is skipped.
     model: sonnet
     skip_permissions: true
-    timeout: 1500
+    # 1500s killed real review batches mid-flight (comments already posted).
+    # Hourly schedule + no-overlap guard bound the cost of a long run anyway.
+    timeout: 3600
     enabled: true
     tags:
       - periodic
       - pr-review
       - echelon
       - next-pwa-app
+      - lpapi
+      - hub-tools
       - seo
   ai-researcher:
     name: AI Researcher — Run Analysis & Improvement Proposals
@@ -605,3 +539,27 @@ jobs:
       - weekly
       - meta
       - health
+  autopilot-daily:
+    name: Autopilot Daily - Triage MBNXT and Ship One Ticket
+    schedule: 30 9 * * 1-5
+    directory: /Users/akorinek/Programming/autopilot-daily
+    type: script
+    command: bash /Users/akorinek/Programming/autopilot-daily/scripts/run-daily.sh
+    timeout: 7200
+    max_retries: 0
+    enabled: true
+    tags:
+      - daily
+      - autopilot
+  autopilot-reconcile:
+    name: Autopilot Reconcile - Sync Ticket States With PR Outcomes
+    schedule: 15 6-22 * * 1-5
+    directory: /Users/akorinek/Programming/autopilot-daily
+    type: script
+    command: bash /Users/akorinek/Programming/autopilot-daily/scripts/run-reconcile.sh
+    timeout: 300
+    max_retries: 0
+    enabled: true
+    tags:
+      - hourly
+      - autopilot

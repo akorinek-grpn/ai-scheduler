@@ -5,6 +5,7 @@ import { StatsCards } from "@/components/stats-cards";
 import { RunsTable } from "@/components/runs-table";
 import { JobCard } from "@/components/job-card";
 import { AiInsights } from "@/components/ai-insights";
+import { ResearchInsights } from "@/components/research-insights";
 import { LifetimeActivity } from "@/components/lifetime-activity";
 import { DashboardCharts } from "@/components/dashboard-charts";
 import {
@@ -44,7 +45,12 @@ function categorizeJobs(jobs: JobResponse[]): JobGroup[] {
   for (const key of [...GROUP_ORDER, "other"]) {
     if (buckets[key]?.length) {
       const meta = GROUP_META[key];
-      groups.push({ key, label: meta.label, desc: meta.desc, jobs: buckets[key] });
+      groups.push({
+        key,
+        label: meta.label,
+        desc: meta.desc,
+        jobs: buckets[key],
+      });
     }
   }
   return groups;
@@ -94,8 +100,12 @@ export default function DashboardPage(): React.ReactElement {
 
       <AiInsights runs={runs} />
 
+      <ResearchInsights />
+
       <section>
-        <h2 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Recent Runs</h2>
+        <h2 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+          Recent Runs
+        </h2>
         <RunsTable runs={runs} limit={15} grouped />
       </section>
 
@@ -103,8 +113,12 @@ export default function DashboardPage(): React.ReactElement {
       {jobGroups.map((group) => (
         <section key={group.key}>
           <div className="flex items-baseline gap-2 mb-2">
-            <h2 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">{group.label}</h2>
-            <span className="text-[11px] text-muted-foreground">{group.desc}</span>
+            <h2 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {group.label}
+            </h2>
+            <span className="text-[11px] text-muted-foreground">
+              {group.desc}
+            </span>
             <div className="flex-1 border-t border-border/30 ml-2 mt-0.5" />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">

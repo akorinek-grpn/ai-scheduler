@@ -67,7 +67,11 @@ export function getJobs(): Promise<JobResponse[]> {
   return fetchApi("/jobs");
 }
 
-export function getRuns(params?: { job?: string; status?: string; limit?: number }): Promise<RunResponse[]> {
+export function getRuns(params?: {
+  job?: string;
+  status?: string;
+  limit?: number;
+}): Promise<RunResponse[]> {
   const searchParams = new URLSearchParams();
   if (params?.job) searchParams.set("job", params.job);
   if (params?.status) searchParams.set("status", params.status);
@@ -76,7 +80,11 @@ export function getRuns(params?: { job?: string; status?: string; limit?: number
   return fetchApi(`/runs${qs ? `?${qs}` : ""}`);
 }
 
-export function getRunLog(jobId: string, runId: string, offset: number): Promise<LogResponse> {
+export function getRunLog(
+  jobId: string,
+  runId: string,
+  offset: number,
+): Promise<LogResponse> {
   return fetchApi(`/runs/${jobId}/${runId}/log?offset=${offset}`);
 }
 
@@ -84,7 +92,10 @@ export function triggerJob(jobId: string): Promise<{ runId: string }> {
   return fetchApi(`/runs/${jobId}/trigger`, { method: "POST" });
 }
 
-export function setJobEnabled(jobId: string, enabled: boolean): Promise<{ ok: boolean; jobId: string; enabled: boolean }> {
+export function setJobEnabled(
+  jobId: string,
+  enabled: boolean,
+): Promise<{ ok: boolean; jobId: string; enabled: boolean }> {
   return fetchApi(`/jobs/${jobId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -131,4 +142,41 @@ export interface CatchupQueueSnapshot {
 
 export function getCatchupQueue(): Promise<CatchupQueueSnapshot> {
   return fetchApi("/queue/catchups");
+}
+
+export type ResearchSeverity = "critical" | "high" | "medium" | "low";
+
+export interface ResearchFinding {
+  id: string;
+  severity: ResearchSeverity;
+  category?: string;
+  jobId?: string;
+  title: string;
+  currentBehavior?: string;
+  proposal?: string;
+  expectedImpact?: string;
+}
+
+export interface ResearchIndexEntry {
+  date: string;
+  hasFindings: boolean;
+  totals?: Record<string, number>;
+  summary?: string;
+}
+
+export interface ResearchReport {
+  date: string;
+  markdown: string | null;
+  findings: ResearchFinding[] | null;
+  totals: Record<string, number> | null;
+  summary: string | null;
+  generatedAt: string | null;
+}
+
+export function getResearchIndex(): Promise<{ reports: ResearchIndexEntry[] }> {
+  return fetchApi("/research");
+}
+
+export function getResearchReport(date: string): Promise<ResearchReport> {
+  return fetchApi(`/research/${date}`);
 }
