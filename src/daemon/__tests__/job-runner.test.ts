@@ -142,6 +142,45 @@ describe("runJob", () => {
     expect(status.status).toBe("timeout");
   }, 10000);
 
+  it("kills the whole process group, not just the spawned shell", async () => {
+    // Reproduces the wedge seen in production: the daemon spawns `/bin/sh -c`,
+    // and signalling only that shell leaves npm/node grandchildren alive. They
+    // keep the inherited stdout pipe open, so `close` never fires, the run is
+    // pinned at "running" forever, and the job is skipped as "still active"
+    // until the daemon restarts.
+    const marker = path.join(tmpDir, "grandchild-alive");
+    const timeoutSec = 0.5;
+    const jobWithTimeout: JobConfig = { ...testJob, timeout: timeoutSec };
+
+    const run = await runJob({
+      jobId: "test-job",
+      jobConfig: jobWithTimeout,
+      projectRoot: tmpDir,
+      trigger: "manual",
+      command: "/bin/sh",
+      // The grandchild outlives the shell and touches the marker if it survives.
+      args: [
+        "-c",
+        `sh -c 'sleep 3; printf alive > "${marker}"' & wait`,
+      ],
+      defaultTimeout: timeoutSec,
+      sigkillGraceMs: 200,
+    });
+
+    const status = JSON.parse(
+      fs.readFileSync(
+        path.join(tmpDir, "data", "runs", "test-job", run.runId, "status.json"),
+        "utf-8",
+      ),
+    );
+    expect(status.status).toBe("timeout");
+
+    // Give the grandchild past its own deadline; if the group kill worked it
+    // died with the shell and never wrote the marker.
+    await new Promise((r) => setTimeout(r, 3500));
+    expect(fs.existsSync(marker)).toBe(false);
+  }, 20000);
+
   it("force-kills a process that ignores SIGTERM within the grace window", async () => {
     // Reproduces the SIGKILL-fallback bug: a process that traps SIGTERM (like a
     // hung `claude -p`) must be escalated to SIGKILL after the grace period. The

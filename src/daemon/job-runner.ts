@@ -260,10 +260,17 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
     exitCode: number | null;
   }> =>
     new Promise((resolve) => {
+      // detached: the child leads its own process group, so a timeout can
+      // signal the whole tree. Without it we signal only the spawned `/bin/sh`
+      // and its npm/node grandchildren survive, keep the inherited stdout pipe
+      // open (so `close` never fires) and pin the run at "running" forever -
+      // which makes the daemon skip every later run of that job as "still
+      // active" until it is restarted.
       const child = spawn(command, args, {
         cwd: jobConfig.directory,
         env: { ...process.env },
         stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
       });
 
       if (isCustomCommand) {
@@ -297,14 +304,30 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
       let isTimedOut = false;
       let processExited = false;
       let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
+
+      // Signal the child's whole process group (negative pid). Falls back to
+      // the child alone if the group is already gone, so a late signal can
+      // never throw ESRCH into the timer callback.
+      const signalTree = (signal: NodeJS.Signals): void => {
+        try {
+          if (child.pid !== undefined) process.kill(-child.pid, signal);
+        } catch {
+          try {
+            child.kill(signal);
+          } catch {
+            // already dead
+          }
+        }
+      };
+
       const timer = setTimeout(() => {
         isTimedOut = true;
-        child.kill("SIGTERM");
+        signalTree("SIGTERM");
         // `child.killed` only reflects that a signal was *sent*, not that the
         // process died. A child that ignores SIGTERM (e.g. a hung `claude -p`)
         // would otherwise never be escalated to SIGKILL. Track real exit instead.
         sigkillTimer = setTimeout(() => {
-          if (!processExited) child.kill("SIGKILL");
+          if (!processExited) signalTree("SIGKILL");
         }, sigkillGraceMs);
       }, timeout * 1000);
 

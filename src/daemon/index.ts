@@ -1,10 +1,13 @@
 import fs from "fs";
 import path from "path";
+import http0 from "http";
+import express0 from "express";
 import { loadConfig } from "./config";
 import { CronEngine } from "./cron-engine";
 import { createApp } from "./api";
 import { getDaemonJsonPath, getRunsDir, getStatusPath, getLatestRunStartedAt } from "@shared/paths";
 import { CatchupQueue, detectMissedRun } from "./catchup";
+import { listenExclusive, PortInUseError } from "./single-instance";
 import type { DaemonHealth, RunStatusFile } from "@shared/types";
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
@@ -116,6 +119,27 @@ function cleanupOrphanedRuns(projectRoot: string): void {
 async function main(): Promise<void> {
   console.log(`[daemon] Starting AI Scheduler daemon (pid: ${process.pid})`);
 
+  // Claim the port first. It is the only reliable single-instance lock, and it
+  // has to happen before any job is scheduled: a second daemon that loses the
+  // bind but keeps going still registers every cron task, and each process has
+  // its own in-memory active-job guard, so every job runs twice.
+  const app0 = express0();
+  const server = http0.createServer(app0);
+  try {
+    await listenExclusive(server, DAEMON_PORT, "127.0.0.1");
+  } catch (err) {
+    if (err instanceof PortInUseError) {
+      console.error(
+        `[daemon] Another daemon is already listening on port ${DAEMON_PORT}. ` +
+          `Refusing to start a second instance - it would schedule every job a ` +
+          `second time. Stop the running one first (./scripts/stop-daemon.sh).`,
+      );
+      process.exit(1);
+    }
+    console.error(`[daemon] Failed to bind port ${DAEMON_PORT}:`, err);
+    process.exit(1);
+  }
+
   cleanupOrphanedRuns(PROJECT_ROOT);
 
   const configResult = loadConfig(CONFIG_PATH);
@@ -162,10 +186,10 @@ async function main(): Promise<void> {
   console.log(`[daemon] Loaded ${Object.keys(configResult.data.jobs).length} jobs`);
   console.log(`[daemon] Scheduled: ${engine.getRegisteredJobIds().join(", ") || "(none)"}`);
 
+  // The port was already claimed above; attach the real routes to it now.
   const app = createApp(engine, PROJECT_ROOT, startedAt);
-  const server = app.listen(DAEMON_PORT, "127.0.0.1", () => {
-    console.log(`[daemon] API listening on http://127.0.0.1:${DAEMON_PORT}`);
-  });
+  app0.use(app);
+  console.log(`[daemon] API listening on http://127.0.0.1:${DAEMON_PORT}`);
 
   writeDaemonJson(startedAt, DAEMON_PORT);
   const heartbeatInterval = startHeartbeat(engine, startedAt, DAEMON_PORT);
