@@ -4,9 +4,11 @@ import path from "path";
 import yaml from "js-yaml";
 import { CronEngine } from "./cron-engine";
 import { loadConfig } from "./config";
-import { getRunsDir, getLogPath, getStatusPath, getMetaPath, getEvalPath } from "@shared/paths";
+import { getLogPath, getStatusPath } from "@shared/paths";
 import { getActivityStats } from "./stats";
-import type { RunSummary, RunMeta, RunStatusFile, RunEvaluation } from "@shared/types";
+import { emptyCostTotals, getCostStats, getRetainedJobCosts } from "./cost-stats";
+import { listRunSummaries, readRunSummary } from "./run-history";
+import type { RunStatusFile } from "@shared/types";
 
 export function createApp(engine: CronEngine, projectRoot: string, startedAt: string): express.Express {
   const configPath = path.join(projectRoot, "scheduler.yaml");
@@ -29,10 +31,12 @@ export function createApp(engine: CronEngine, projectRoot: string, startedAt: st
       return;
     }
 
+    const costs = getRetainedJobCosts(projectRoot);
     const jobs = Object.entries(config.jobs).map(([id, job]) => ({
       id,
       ...job,
       isActive: engine.getActiveJobIds().includes(id),
+      cost: costs.get(id) ?? emptyCostTotals(),
     }));
 
     res.json(jobs);
@@ -43,67 +47,17 @@ export function createApp(engine: CronEngine, projectRoot: string, startedAt: st
     const statusFilter = req.query.status as string | undefined;
     const limit = parseInt(req.query.limit as string) || 50;
 
-    const runsDir = getRunsDir(projectRoot);
-    const runs: RunSummary[] = [];
+    const runs = listRunSummaries(projectRoot, jobFilter).filter((run) => !statusFilter || run.status === statusFilter);
+    res.json(runs.slice(0, limit));
+  });
 
-    if (!fs.existsSync(runsDir)) {
-      res.json([]);
+  app.get("/api/runs/:jobId/:runId", (req, res) => {
+    const run = readRunSummary(projectRoot, req.params.jobId, req.params.runId);
+    if (!run) {
+      res.status(404).json({ error: "Run not found" });
       return;
     }
-
-    const jobDirs = fs.readdirSync(runsDir).filter((d) => {
-      if (jobFilter && d !== jobFilter) return false;
-      const fullPath = path.join(runsDir, d);
-      return fs.statSync(fullPath).isDirectory();
-    });
-
-    for (const jobId of jobDirs) {
-      const jobDir = path.join(runsDir, jobId);
-      const runDirs = fs.readdirSync(jobDir).filter((d) => {
-        if (d === "latest") return false;
-        return fs.statSync(path.join(jobDir, d)).isDirectory();
-      });
-
-      for (const runId of runDirs) {
-        try {
-          const metaPath = getMetaPath(projectRoot, jobId, runId);
-          const statusPath = getStatusPath(projectRoot, jobId, runId);
-
-          if (!fs.existsSync(metaPath) || !fs.existsSync(statusPath)) continue;
-
-          const meta: RunMeta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
-          const status: RunStatusFile = JSON.parse(fs.readFileSync(statusPath, "utf-8"));
-
-          if (statusFilter && status.status !== statusFilter) continue;
-
-          let evaluation: RunEvaluation | undefined;
-          const evalPath = getEvalPath(projectRoot, jobId, runId);
-          try {
-            if (fs.existsSync(evalPath)) {
-              evaluation = JSON.parse(fs.readFileSync(evalPath, "utf-8"));
-            }
-          } catch { /* skip */ }
-
-          runs.push({
-            jobId,
-            runId,
-            jobName: meta.jobConfig.name,
-            directory: meta.jobConfig.directory,
-            status: status.status,
-            trigger: meta.trigger,
-            startedAt: status.startedAt,
-            finishedAt: status.finishedAt,
-            exitCode: status.exitCode,
-            evaluation,
-          });
-        } catch {
-          // skip corrupt run data
-        }
-      }
-    }
-
-    runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-    res.json(runs.slice(0, limit));
+    res.json(run);
   });
 
   app.get("/api/runs/:jobId/:runId/log", (req, res) => {
@@ -211,6 +165,16 @@ export function createApp(engine: CronEngine, projectRoot: string, startedAt: st
     const days = Number.isFinite(raw) ? Math.min(90, Math.max(1, raw)) : 30;
     const stats = getActivityStats(projectRoot, days);
     res.json(stats);
+  });
+
+  app.get("/api/stats/costs", (req, res) => {
+    const raw = req.query.days ?? "30";
+    const days = typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isInteger(days) || days < 1 || days > 90) {
+      res.status(400).json({ error: "days must be an integer from 1 to 90" });
+      return;
+    }
+    res.json(getCostStats(projectRoot, days));
   });
 
   app.get("/api/queue/catchups", (_req, res) => {

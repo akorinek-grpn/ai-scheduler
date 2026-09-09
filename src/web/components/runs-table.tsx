@@ -3,6 +3,9 @@
 import { useMemo, Fragment } from "react";
 import Link from "next/link";
 import type { RunResponse, RunEvaluation } from "@/lib/api-client";
+import { CostValue } from "./cost-value";
+import { ModelLabels } from "./model-labels";
+import { getExecutionModels } from "../../shared/model-usage";
 
 interface RunsTableProps {
   runs: RunResponse[];
@@ -129,8 +132,8 @@ function RunRow({ run }: { run: RunResponse }): React.ReactElement {
     <Link
       href={`/runs/${run.jobId}/${run.runId}`}
       className={`
-        flex items-center gap-3 px-3 py-1.5 rounded transition-colors
-        hover:bg-secondary/60
+        flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 px-3 py-1.5 rounded transition-colors
+        hover:bg-secondary/60 focus-visible:outline-2 focus-visible:outline-ring
         ${isBad || evIsBad ? "bg-red-500/[0.03]" : isPartial ? "bg-amber-500/[0.04]" : ""}
       `}
     >
@@ -143,7 +146,7 @@ function RunRow({ run }: { run: RunResponse }): React.ReactElement {
       </span>
 
       {/* Eval one-liner */}
-      <span className="flex-1 min-w-0 truncate text-[12px]">
+      <span className="flex-1 basis-full sm:basis-auto min-w-0 truncate text-[12px]">
         {ev ? (
           <span className={evalColor[ev.severity] ?? "text-muted-foreground"}>
             <span className="font-medium">{evalIcon[ev.severity]}</span>
@@ -156,6 +159,12 @@ function RunRow({ run }: { run: RunResponse }): React.ReactElement {
         ) : (
           <span className="text-muted-foreground">{"\u2014"}</span>
         )}
+      </span>
+
+      <span className="w-full space-y-1 text-[12px] text-muted-foreground sm:w-52 shrink-0">
+        <span className="sr-only">Reported USD estimate: </span>
+        <CostValue value={run.cost?.totalCostUsd} coverage={run.cost?.coverage ?? "unavailable"} />
+        <ModelLabels models={getExecutionModels(run.cost)} configuredModel={run.configuredModel} />
       </span>
 
       {/* Trigger */}

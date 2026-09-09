@@ -41,6 +41,44 @@ Data flows through the filesystem:
 scheduler.yaml → Daemon → data/runs/ → Web UI
 ```
 
+## Costs and Usage
+
+The Dashboard shows reported USD costs for today, this month, and retained history, plus a 7/30/90-day daily trend and job ranking. Daily and monthly boundaries use **UTC**. Jobs show totals across their retained runs; run details break down execution, retries, script tasks, evaluator overhead, and reported model/token usage.
+
+Model labels accompany costs in recent runs, the run list, job cards, and the selected-period Dashboard overview and ranking. They show exact **reported execution model IDs**, deduplicated across tasks and retry attempts; evaluator models appear separately on run details and never count as execution models. Job totals include models from all retained runs, while Dashboard period labels follow the selected date range. Missing reports display **Models unavailable**. A **Configured model** fallback is not evidence of actual usage: run fallbacks come from that run's saved configuration, not today's job settings.
+
+- Native Claude jobs automatically capture `total_cost_usd` and usage from their structured result. Cumulative results replace prior reports within an attempt, while retry attempts add together. Parent session totals already include native subagents; their results are not added again. Separately launched CLI/API calls inside tools are not automatically attributed.
+- The post-run Haiku evaluation is tracked separately, even when its assessment cannot be parsed. An evaluation still running is marked pending.
+- These are **reported API-equivalent estimates, not subscription invoices or payment charges**. No hardcoded pricing table is used. External provider charges, subscription fees, and unreported nested work are excluded.
+- Missing, corrupt, historical, or uninstrumented usage is **unavailable**, not $0. Partial totals include only known amounts. Dashboard coverage shows how many runs report costs; averages use those tracked runs and can include partial totals. Interrupted attempts without a final cost result remain unavailable.
+- Totals cover **retained history**, not lifetime billing: pruning a run also removes its costs. All retained runs contribute, independently of the run list's pagination. An old run's direct URL still loads its cost details.
+
+New runs write `costs.json` alongside `meta.json` and `status.json`. Evaluation costs live in a separate `evaluation-cost.json` so the evaluator and runner do not overwrite each other's data. Cost files are atomically replaced. Existing runs are not assigned guessed prices or modified to backfill dollar amounts.
+
+### Reporting Costs from Script Tasks
+
+Scripts may invoke arbitrary providers, so the scheduler cannot infer their bill from text logs. To report actual provider usage, emit one JSON object per stdout line:
+
+```json
+{"type":"scheduler_cost","id":"briefing","label":"Morning briefing","currency":"USD","cost_usd":0.0125,"model":"your-model-id","usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}
+{"type":"scheduler_cost","id":"summary","label":"Daily summary","currency":"USD","cost_usd":0.02}
+{"type":"scheduler_cost_complete"}
+```
+
+Use the provider's reported cost, not the example amounts. `id`, `currency: "USD"`, and a finite nonnegative numeric `cost_usd` are required; `label` and `usage` are optional. Amounts are **cumulative per task ID within the current attempt**: repeat the same ID to update its total, or use different IDs for independently billed tasks. Do not report a parent total alongside child costs that it already includes.
+
+Scripts can optionally include `model` (a nonblank model ID up to 256 characters) on each task report, even without token counts. Report separate task IDs for separately billed models; the scheduler displays these IDs but does not calculate prices from them. Repeated task reports replace the prior model attribution along with that task's cumulative amount.
+
+Emit `scheduler_cost_complete` after all task reports only when every cost-bearing task in the attempt is covered. Without it, the attempt stays partial. Explicit zero is supported for a verified no-cost task; no output never implies zero. Script stdout remains unchanged in the log. Scripts also receive `SCHEDULER_JOB_ID`, `SCHEDULER_RUN_ID`, and `SCHEDULER_ATTEMPT` for attribution. A script can use this contract for any provider, including Codex or direct API calls; uninstrumented scripts continue running unchanged.
+
+### Cost API
+
+- `GET /api/stats/costs?days=30` — UTC daily buckets, selected-period job ranking, today/month/retained totals and coverage. `days` must be an integer from 1 to 90.
+- `GET /api/jobs` — each job includes its retained-history `cost` totals.
+- `GET /api/runs` and `GET /api/runs/:jobId/:runId` — include the run's `cost` breakdown; the exact-run endpoint is not subject to pagination.
+
+Restart the daemon after installing this code to enable capture for subsequent runs. Hot-reloading `scheduler.yaml` alone does not load code changes. Let active runs finish before restarting; no paid jobs need to be triggered to enable the feature.
+
 ## Managing Jobs
 
 ### Using the Claude Code Skill (recommended)

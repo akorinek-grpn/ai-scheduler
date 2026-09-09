@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { RunHistoryDots } from "@/components/run-history-dots";
 import { getJobs, getRuns, triggerJob, setJobEnabled, type JobResponse, type RunResponse } from "@/lib/api-client";
 import { formatCronHuman } from "@/lib/format-cron";
+import { JobCost } from "@/components/cost-value";
+import { COST_DISCLAIMER } from "@/lib/cost-format";
 
 const severityStyles: Record<string, string> = {
   ok: "text-green-500",
@@ -195,6 +197,8 @@ export default function JobsPage(): React.ReactElement {
         )}
       </div>
 
+      <p className="text-xs text-muted-foreground">{COST_DISCLAIMER}</p>
+
       {/* Filters */}
       <Card>
         <CardContent className="pt-4 space-y-3">
@@ -321,11 +325,13 @@ export default function JobsPage(): React.ReactElement {
                         <span className="font-mono">{job.directory}</span>
                         <span className="mx-2">{"\u00B7"}</span>
                         <span>{formatCronHuman(job.schedule)}</span>
-                        {job.model && <><span className="mx-2">{"\u00B7"}</span><span>model: {job.model}</span></>}
+                        {job.type !== "script" && job.model && <><span className="mx-2">{"\u00B7"}</span><span>configured model: {job.model}</span></>}
                       </div>
                       <div className="text-xs text-muted-foreground mt-1 max-w-xl truncate">
                         {job.type === "script" ? `$ ${job.command}` : job.prompt}
                       </div>
+
+                      <div className="mt-2"><JobCost jobId={job.id} cost={job.cost} configuredModel={job.type === "script" ? undefined : job.model} /></div>
 
                       {lastEval && (
                         <div className="mt-2 flex items-start gap-2 text-xs">

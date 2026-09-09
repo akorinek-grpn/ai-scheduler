@@ -551,6 +551,23 @@ jobs:
     tags:
       - daily
       - autopilot
+  speedboat-cycle-cron:
+    name: Speedboat Check-in - Daily Cycle Gate (kickoff / chase)
+    # Daily INCLUDING weekends: chase-pre can land on a Saturday (run 2's is
+    # Sat 29 Aug). The gate makes almost every run a cheap no-op; kickoff fires
+    # only while the backend still sits on the previous cycle, so a missed or
+    # failed day self-heals the next morning (go-live Gate 2.5, and
+    # docs/run-schedule.md in the repo).
+    schedule: 45 8 * * *
+    directory: /Users/akorinek/Programming/speedboat-checkin
+    type: script
+    command: bash /Users/akorinek/Programming/speedboat-checkin/scripts/cycle-cron.sh
+    # Kickoff resolves the Echelon roster and creates ~50 Asana tasks headless.
+    timeout: 3600
+    enabled: true
+    tags:
+      - daily
+      - speedboat-checkin
   autopilot-reconcile:
     name: Autopilot Reconcile - Sync Ticket States With PR Outcomes
     schedule: 15 6-22 * * 1-5
@@ -563,3 +580,58 @@ jobs:
     tags:
       - hourly
       - autopilot
+
+  answer-pr-comments:
+    name: Answer PR Comments - Conversation Pass
+    schedule: 30 6-22 * * 1-5
+    directory: /Users/akorinek/Programming/ai-scheduler
+    prompt: |
+      ## FIRST, BEFORE ANYTHING ELSE: check the autopilot-daily lock
+
+      Run: `cat ~/.autopilot-daily.lock 2>/dev/null`
+
+      If that file exists AND its `startedAt` epoch-milliseconds value is less
+      than 120 minutes old, the autopilot-daily job is mid-run and holds the
+      machine. In that case print exactly:
+        "Deferred - autopilot-daily holds the lock"
+      and STOP immediately. Do not call any other tool. You will run again next hour.
+
+      If the file is absent, unparseable, or older than 120 minutes, proceed.
+
+      ## Conversation pass
+
+      Run EXACTLY this, with NO arguments. It is batch-scoped across every
+      configured repo, plus every PR you have already engaged with in any other
+      repo (reach discovery). Never pass --pr and never run it once per PR:
+
+        bash ~/.claude/skills/pr-review/scripts/conversation-preflight.sh
+
+      Read its final "CONVERSATION_RESULT_JSON:" line.
+
+      - pending EMPTY and no verdict_state entry with block_lift_eligible true ->
+        print the script's CONV and VERDICT lines and STOP. This is the expected
+        outcome of most runs.
+      - otherwise -> follow
+        ~/.claude/skills/pr-review/references/conversation-pass.md EXACTLY for
+        those items, with --auto behavior. That reference is self-contained; do
+        NOT read SKILL.md.
+      - exit code 2 -> a host was unreachable. Name WHICH host in your summary,
+        then continue with whatever items were emitted.
+
+      This job answers people. It posts thread replies, thread resolutions with a
+      recorded basis, and at most one review dismissal per PR. It NEVER reviews
+      code and NEVER posts APPROVE, COMMENT, or REQUEST_CHANGES - verdicts belong
+      to the babysit-prs job.
+
+      ## CRITICAL: host -> username mapping
+      | Host | My username |
+      |---|---|
+      | github.com | akorinek-grpn |
+      | github.groupondev.com | akorinek |
+    model: sonnet
+    skip_permissions: true
+    timeout: 1800
+    enabled: true
+    tags:
+      - hourly
+      - pr-review

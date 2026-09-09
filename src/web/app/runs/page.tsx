@@ -1,15 +1,30 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { RunsTable } from "@/components/runs-table";
 import { getRuns, getJobs, type RunResponse, type JobResponse } from "@/lib/api-client";
+import { COST_DISCLAIMER } from "@/lib/cost-format";
 
 export default function RunHistoryPage(): React.ReactElement {
+  return <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">Loading runs…</p>}><RunHistoryContent /></Suspense>;
+}
+
+function RunHistoryContent(): React.ReactElement {
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [runs, setRuns] = useState<RunResponse[]>([]);
   const [jobs, setJobs] = useState<JobResponse[]>([]);
-  const [jobFilter, setJobFilter] = useState<string | null>(null);
+  const jobFilter = searchParams.get("job") || null;
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+
+  const setJobFilter = (jobId: string | null): void => {
+    const query = new URLSearchParams(searchParams.toString());
+    if (jobId) query.set("job", jobId);
+    else query.delete("job");
+    router.replace(`/runs${query.size ? `?${query}` : ""}`, { scroll: false });
+  };
 
   const fetchAll = useCallback(async () => {
     const [r, j] = await Promise.all([
@@ -70,10 +85,13 @@ export default function RunHistoryPage(): React.ReactElement {
         )}
       </div>
 
+      <p className="text-[11px] text-muted-foreground">{COST_DISCLAIMER} Partial totals exclude missing costs; unavailable is not zero.</p>
+      {jobFilter && <p className="text-[12px] text-muted-foreground">Job: {jobs.find((job) => job.id === jobFilter)?.name ?? jobFilter}</p>}
+
       {/* Filters */}
       <div className="flex flex-wrap gap-x-4 gap-y-1 items-center">
         {/* Job filter */}
-        <div className="flex items-center gap-0.5">
+        <div className="flex flex-wrap items-center gap-0.5">
           <span className="text-[10px] text-muted-foreground uppercase tracking-wider mr-1 w-6">job</span>
           <button
             onClick={() => setJobFilter(null)}

@@ -6,28 +6,63 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { LogViewer } from "@/components/log-viewer";
-import { getRuns, type RunResponse } from "@/lib/api-client";
+import { RunCostDetails } from "@/components/run-cost-details";
+import { ApiError, getRun, getRuns, type RunResponse } from "@/lib/api-client";
 
 export default function RunDetailPage(): React.ReactElement {
   const params = useParams<{ jobId: string; runId: string }>();
   const router = useRouter();
   const [run, setRun] = useState<RunResponse | null>(null);
   const [siblingRuns, setSiblingRuns] = useState<RunResponse[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
-    const poll = () => {
-      getRuns({ job: params.jobId })
-        .then((runs) => {
-          setSiblingRuns(runs);
-          const found = runs.find((r) => r.runId === params.runId);
-          if (found) setRun(found);
-        })
-        .catch(() => {});
+    let disposed = false;
+    let pending = false;
+    let controller: AbortController | null = null;
+    setRun(null);
+    setSiblingRuns([]);
+    setError(null);
+    setIsLoading(true);
+    const poll = async (): Promise<void> => {
+      if (pending) return;
+      pending = true;
+      getRuns({ job: params.jobId }).then((runs) => {
+        if (!disposed) setSiblingRuns(runs);
+      }).catch(() => {});
+      controller = new AbortController();
+      const timeout = setTimeout(() => controller?.abort(), 15_000);
+      try {
+        const exactRun = await getRun(params.jobId, params.runId, controller.signal);
+        if (!disposed) {
+          setRun(exactRun);
+          setError(null);
+        }
+      } catch (failure) {
+        if (!disposed) {
+          if (failure instanceof ApiError && failure.status === 404) {
+            setRun(null);
+            setError("Run not found. It may have been pruned from retained history.");
+          } else {
+            setError(failure instanceof Error ? failure.message : "Unable to load this run");
+          }
+        }
+      } finally {
+        clearTimeout(timeout);
+        pending = false;
+        if (!disposed) setIsLoading(false);
+      }
     };
-    poll();
-    const interval = setInterval(poll, 5_000);
-    return () => clearInterval(interval);
-  }, [params.jobId, params.runId]);
+    void poll();
+    const interval = setInterval(() => void poll(), 5_000);
+    return () => {
+      disposed = true;
+      controller?.abort();
+      clearInterval(interval);
+    };
+  }, [params.jobId, params.runId, retry]);
 
   const statusColors: Record<string, string> = {
     running: "border-yellow-500/50 text-yellow-500",
@@ -49,7 +84,7 @@ export default function RunDetailPage(): React.ReactElement {
 
   // Prev/next navigation
   const currentIndex = siblingRuns.findIndex((r) => r.runId === params.runId);
-  const prevRun = currentIndex < siblingRuns.length - 1 ? siblingRuns[currentIndex + 1] : null;
+  const prevRun = currentIndex >= 0 && currentIndex < siblingRuns.length - 1 ? siblingRuns[currentIndex + 1] : null;
   const nextRun = currentIndex > 0 ? siblingRuns[currentIndex - 1] : null;
 
   return (
@@ -98,6 +133,14 @@ export default function RunDetailPage(): React.ReactElement {
         </div>
       </div>
 
+      {isLoading && <p role="status" className="mb-4 text-sm text-muted-foreground">Loading run details…</p>}
+      {error && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded border border-border bg-card p-3 text-sm">
+          <p>{run ? "Refresh failed; displaying the last report. " : ""}{error}</p>
+          <Button variant="outline" size="sm" onClick={() => setRetry((value) => value + 1)}>Retry run</Button>
+        </div>
+      )}
+
       {/* AI Evaluation Card */}
       {evalData && es && (
         <Card className={`mb-4 ${es.border} ${es.bg}`}>
@@ -133,7 +176,8 @@ export default function RunDetailPage(): React.ReactElement {
         </Card>
       )}
 
-      <LogViewer jobId={params.jobId} runId={params.runId} />
+      {run && <RunCostDetails cost={run.cost} configuredModel={run.configuredModel} />}
+      {run && <LogViewer jobId={params.jobId} runId={params.runId} />}
     </div>
   );
 }

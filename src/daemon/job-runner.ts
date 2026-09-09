@@ -1,6 +1,9 @@
 import { spawn } from "child_process";
 import fs from "fs";
 import crypto from "crypto";
+import { StringDecoder } from "node:string_decoder";
+import type { AttemptCost } from "@shared/cost-types";
+import { CostTracker, writeEvaluationCost, writeRunCost } from "./costs";
 import type {
   JobConfig,
   TriggerType,
@@ -242,6 +245,8 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
   let toolCalls = 0;
 
   const isAiSession = jobConfig.type !== "script";
+  const attemptCosts: AttemptCost[] = [];
+  writeEvaluationCost(projectRoot, jobId, runId, "pending");
 
   const writeStats = (): void => {
     const stats: RunStats = { toolCalls, toolsByName, isAiSession };
@@ -255,11 +260,17 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
   // but does NOT finalize the run record, so runJob can retry before committing
   // the final status + latest symlink. The shared logStream stays open across
   // attempts (piped with `end: false`) and is closed once during finalization.
-  const runAttempt = (): Promise<{
+  const runAttempt = (attempt: number): Promise<{
     status: RunStatus;
     exitCode: number | null;
   }> =>
     new Promise((resolve) => {
+      const costTracker = new CostTracker(isCustomCommand ? "script" : "claude", attempt);
+      const persistCost = (): void => {
+        attemptCosts[attempt - 1] = costTracker.snapshot();
+        writeRunCost(projectRoot, jobId, runId, attemptCosts);
+      };
+      persistCost();
       // detached: the child leads its own process group, so a timeout can
       // signal the whole tree. Without it we signal only the spawned `/bin/sh`
       // and its npm/node grandchildren survive, keep the inherited stdout pipe
@@ -268,7 +279,12 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
       // active" until it is restarted.
       const child = spawn(command, args, {
         cwd: jobConfig.directory,
-        env: { ...process.env },
+        env: {
+          ...process.env,
+          SCHEDULER_JOB_ID: jobId,
+          SCHEDULER_RUN_ID: runId,
+          SCHEDULER_ATTEMPT: String(attempt),
+        },
         stdio: ["ignore", "pipe", "pipe"],
         detached: true,
       });
@@ -276,28 +292,39 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
       if (isCustomCommand) {
         // For test commands (echo, sh, etc.) - pipe directly
         child.stdout.pipe(logStream, { end: false });
-      } else {
-        // For claude with stream-json - parse events and extract text
-        let buffer = "";
-        child.stdout.on("data", (chunk: Buffer) => {
-          buffer += chunk.toString();
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            const text = extractTextFromStreamJson(trimmed);
-            if (text) {
-              logStream.write(text);
-            }
-            for (const name of countToolUseInStreamEvent(trimmed)) {
-              toolCalls += 1;
-              toolsByName[name] = (toolsByName[name] ?? 0) + 1;
-            }
-          }
-        });
       }
+      const decoder = new StringDecoder("utf8");
+      let buffer = "";
+      let oversizedLine = false;
+      const consumeLine = (line: string): void => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        if (costTracker.consume(trimmed)) persistCost();
+        if (isCustomCommand) return;
+        const text = extractTextFromStreamJson(trimmed);
+        if (text) logStream.write(text);
+        for (const name of countToolUseInStreamEvent(trimmed)) {
+          toolCalls += 1;
+          toolsByName[name] = (toolsByName[name] ?? 0) + 1;
+        }
+      };
+      child.stdout.on("data", (chunk: Buffer) => {
+        const lines = (buffer + decoder.write(chunk)).split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!oversizedLine) consumeLine(line);
+          oversizedLine = false;
+        }
+        if (isCustomCommand && buffer.length > 1_048_576) {
+          buffer = "";
+          oversizedLine = true;
+        }
+      });
+      const finishOutput = (): void => {
+        if (!oversizedLine) consumeLine(buffer + decoder.end());
+        buffer = "";
+        persistCost();
+      };
 
       child.stderr.pipe(logStream, { end: false });
 
@@ -332,6 +359,7 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
       }, timeout * 1000);
 
       child.on("close", (code) => {
+        finishOutput();
         processExited = true;
         clearTimeout(timer);
         if (sigkillTimer) clearTimeout(sigkillTimer);
@@ -372,7 +400,7 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
         `\n=== retry ${attempt}/${maxRetries} (previous attempt: ${result.status}) ===\n`,
       );
     }
-    result = await runAttempt();
+    result = await runAttempt(attempt + 1);
     attemptsRun += 1;
     if (result.status === "success") break;
     if (result.status === "timeout") {

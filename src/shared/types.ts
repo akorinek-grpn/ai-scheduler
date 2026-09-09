@@ -1,3 +1,5 @@
+import type { RunCostSummary } from "./cost-types";
+
 export type RunStatus = "running" | "success" | "partial" | "failed" | "timeout";
 export type TriggerType = "scheduled" | "manual" | "catchup";
 
@@ -95,6 +97,8 @@ export interface RunSummary {
   finishedAt: string | null;
   exitCode: number | null;
   evaluation?: RunEvaluation;
+  cost?: RunCostSummary;
+  configuredModel?: string;
   catchupFor?: string;
 }
 

@@ -1,4 +1,15 @@
+import type { CostStatsResponse, CostTotals, RunCostSummary } from "../../shared/cost-types";
+
 const DAEMON_API_BASE = "/api";
+
+export type CostPeriod = 7 | 30 | 90;
+
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 export interface HealthResponse {
   status: string;
@@ -20,6 +31,7 @@ export interface JobResponse {
   timeout?: number;
   tags: string[];
   isActive: boolean;
+  cost: CostTotals;
 }
 
 export interface RunEvaluation {
@@ -42,6 +54,8 @@ export interface RunResponse {
   exitCode: number | null;
   evaluation?: RunEvaluation;
   catchupFor?: string;
+  cost: RunCostSummary;
+  configuredModel?: string;
 }
 
 export interface LogResponse {
@@ -54,7 +68,10 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${DAEMON_API_BASE}${path}`, options);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error((err as Record<string, string>).error || res.statusText);
+    const message = err && typeof err === "object" && "error" in err && typeof err.error === "string"
+      ? err.error
+      : res.statusText;
+    throw new ApiError(message || `Request failed (${res.status})`, res.status);
   }
   return res.json() as Promise<T>;
 }
@@ -86,6 +103,14 @@ export function getRunLog(
   offset: number,
 ): Promise<LogResponse> {
   return fetchApi(`/runs/${jobId}/${runId}/log?offset=${offset}`);
+}
+
+export function getRun(jobId: string, runId: string, signal?: AbortSignal): Promise<RunResponse> {
+  return fetchApi(`/runs/${encodeURIComponent(jobId)}/${encodeURIComponent(runId)}`, { cache: "no-store", signal });
+}
+
+export function getCostStats(days: CostPeriod = 30, signal?: AbortSignal): Promise<CostStatsResponse> {
+  return fetchApi(`/stats/costs?days=${days}`, { cache: "no-store", signal });
 }
 
 export function triggerJob(jobId: string): Promise<{ runId: string }> {

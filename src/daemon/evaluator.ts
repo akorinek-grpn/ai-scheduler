@@ -2,6 +2,7 @@ import { spawn } from "child_process";
 import fs from "fs";
 import type { RunEvaluation, RunStatus } from "@shared/types";
 import { getLogPath, getEvalPath } from "@shared/paths";
+import { CostTracker, writeEvaluationCost } from "./costs";
 
 const EVAL_PROMPT = `You are evaluating the output of a scheduled AI job run. Analyze the output and respond with ONLY a JSON object (no markdown, no code fences, no explanation) in this exact format:
 
@@ -87,17 +88,19 @@ export async function evaluateRun(
   }
 
   const prompt = buildEvalPrompt(jobName, status, exitCode, output);
+  writeEvaluationCost(projectRoot, jobId, runId, "pending");
 
   return new Promise<RunEvaluation | null>((resolve) => {
-    const child = spawn("claude", ["-p", "--model", "haiku", "--no-session-persistence", prompt], {
+    const child = spawn("claude", ["-p", "--model", "haiku", "--output-format", "json", "--no-session-persistence", prompt], {
       cwd: projectRoot,
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"],
     });
 
     let stdout = "";
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
     });
 
     const timer = setTimeout(() => {
@@ -107,7 +110,19 @@ export async function evaluateRun(
     child.on("close", () => {
       clearTimeout(timer);
 
-      const evaluation = parseEvalResponse(stdout);
+      const tracker = new CostTracker("claude", 1);
+      tracker.consume(stdout);
+      const snapshot = tracker.snapshot();
+      writeEvaluationCost(projectRoot, jobId, runId, snapshot.complete ? "complete" : "unavailable", snapshot.entries[0] ?? null);
+      let evaluation: RunEvaluation | null = null;
+      try {
+        const result: unknown = JSON.parse(stdout);
+        if (result && typeof result === "object" && "type" in result && result.type === "result" && "result" in result && typeof result.result === "string") {
+          evaluation = parseEvalResponse(result.result);
+        }
+      } catch {
+        evaluation = null;
+      }
       if (evaluation) {
         const evalPath = getEvalPath(projectRoot, jobId, runId);
         fs.writeFileSync(evalPath, JSON.stringify(evaluation, null, 2));
@@ -122,6 +137,7 @@ export async function evaluateRun(
     child.on("error", (err) => {
       clearTimeout(timer);
       console.error(`[eval] ${jobId}: process error: ${err.message}`);
+      writeEvaluationCost(projectRoot, jobId, runId, "unavailable");
       resolve(null);
     });
   });

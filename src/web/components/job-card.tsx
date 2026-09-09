@@ -7,6 +7,7 @@ import type { JobResponse, RunResponse } from "@/lib/api-client";
 import { triggerJob, setJobEnabled } from "@/lib/api-client";
 import { formatCronHuman } from "@/lib/format-cron";
 import { useState } from "react";
+import { JobCost } from "./cost-value";
 
 interface JobCardProps {
   job: JobResponse;
@@ -97,7 +98,7 @@ export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.Rea
         <span className="font-mono">{job.directory.split("/").pop()}</span>
         <span className="mx-1.5 text-border">/</span>
         <span>{formatCronHuman(job.schedule)}</span>
-        {job.model && <span className="ml-1.5 text-muted-foreground">{job.model}</span>}
+        {job.type !== "script" && job.model && <span className="ml-1.5 text-muted-foreground">configured: {job.model}</span>}
       </div>
 
       {/* Eval summary (compact) */}
@@ -109,6 +110,8 @@ export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.Rea
           </p>
         </div>
       )}
+
+      <div className="mb-2"><JobCost jobId={job.id} cost={job.cost} configuredModel={job.type === "script" ? undefined : job.model} /></div>
 
       {/* Run history + actions */}
       <div className="flex items-center gap-2 pt-1.5 border-t border-border/50">

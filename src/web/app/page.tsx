@@ -8,6 +8,7 @@ import { AiInsights } from "@/components/ai-insights";
 import { ResearchInsights } from "@/components/research-insights";
 import { LifetimeActivity } from "@/components/lifetime-activity";
 import { DashboardCharts } from "@/components/dashboard-charts";
+import { CostOverview } from "@/components/cost-overview";
 import {
   getHealth,
   getJobs,
@@ -95,6 +96,8 @@ export default function DashboardPage(): React.ReactElement {
       <StatsCards jobs={jobs} runs={runs} health={health} catchups={catchups} />
 
       <LifetimeActivity />
+
+      <CostOverview />
 
       <DashboardCharts runs={runs} jobs={jobs} />
 
