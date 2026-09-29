@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { getHealth, type HealthResponse } from "@/lib/api-client";
+import { getCatchupQueue, getHealth, type HealthResponse } from "@/lib/api-client";
+import { CATCHUP_RUNS_HREF, pendingCatchupCount } from "@/lib/catchup-runs";
 import { useNotificationContext } from "@/components/notification-provider";
 
 const navItems = [
@@ -18,18 +19,32 @@ const navItems = [
 export function Sidebar(): React.ReactElement {
   const pathname = usePathname();
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [catchupCount, setCatchupCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const { permission, requestPermission } = useNotificationContext();
 
   useEffect(() => {
-    const fetchHealth = () => {
-      getHealth()
-        .then(setHealth)
-        .catch(() => setHealth(null));
+    let disposed = false;
+    let pending = false;
+    // One poll reads health and the catch-up queue; a slow poll is never overlapped.
+    const poll = async (): Promise<void> => {
+      if (pending) return;
+      pending = true;
+      const [nextHealth, queue] = await Promise.all([
+        getHealth().catch(() => null),
+        getCatchupQueue().catch(() => null),
+      ]);
+      pending = false;
+      if (disposed) return;
+      setHealth(nextHealth);
+      setCatchupCount(pendingCatchupCount(queue));
     };
-    fetchHealth();
-    const interval = setInterval(fetchHealth, 10_000);
-    return () => clearInterval(interval);
+    void poll();
+    const interval = setInterval(() => void poll(), 10_000);
+    return () => {
+      disposed = true;
+      clearInterval(interval);
+    };
   }, []);
 
   useEffect(() => {
@@ -89,7 +104,7 @@ export function Sidebar(): React.ReactElement {
         <nav className="flex flex-1 flex-col gap-px py-2 px-2">
           {navItems.map((item) => {
             const isActive = pathname === item.href;
-            return (
+            const link = (
               <Link
                 key={item.href}
                 href={item.href}
@@ -105,6 +120,27 @@ export function Sidebar(): React.ReactElement {
                 </span>
                 {item.label}
               </Link>
+            );
+            if (item.href !== "/runs") return link;
+            const catchupLabel = `${catchupCount} catch-up ${catchupCount === 1 ? "run" : "runs"} waiting or running`;
+            // Runs keeps one wrapper so its link is not remounted (losing focus) when the pill comes and goes.
+            // The pill is a sibling link over the row's right end (links cannot nest), shown only while
+            // catch-ups are waiting or running.
+            return (
+              <div key={item.href} className="relative">
+                {link}
+                {catchupCount > 0 && (
+                  <Link
+                    href={CATCHUP_RUNS_HREF}
+                    aria-label={catchupLabel}
+                    title={catchupLabel}
+                    className="absolute right-1 top-1/2 inline-flex h-[24px] min-w-[24px] -translate-y-1/2 items-center justify-center gap-0.5 rounded-full border border-blue-700/40 px-1.5 font-mono text-[10px] tabular-nums text-blue-700 transition-colors hover:bg-secondary dark:border-blue-400/40 dark:text-blue-400"
+                  >
+                    <span aria-hidden="true">↻</span>
+                    {catchupCount}
+                  </Link>
+                )}
+              </div>
             );
           })}
         </nav>

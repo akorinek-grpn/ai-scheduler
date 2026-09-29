@@ -30,7 +30,9 @@ Required info (ask if not provided):
 - **directory**: absolute path to the working directory
 - **prompt**: the instruction for Claude
 
-Optional: `model`, `timeout`, `tags`, `enabled`, `skip_permissions`
+Optional: `model`, `timeout`, `tags`, `enabled`, `skip_permissions`, `max_retries`, `catchup`
+- `max_retries`: extra attempts after a failed or partial run (falls back to `defaults.max_retries`, 0 unless set); a timed-out run is never retried
+- `catchup`: what to do when a slot did not run (machine asleep, daemon down, previous run still going). `always` (default) runs one catch-up, dropped if the job runs anyway before its turn; `same-day` runs it only if it starts on the slot's local date, so use it for prompts about "today" or "tomorrow"; `never` skips it
 
 ### List jobs
 Read `scheduler.yaml` and display all jobs in a readable format.

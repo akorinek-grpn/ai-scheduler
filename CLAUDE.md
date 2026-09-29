@@ -94,15 +94,18 @@ jobs:
     enabled: true
     model: "sonnet" | "opus" | "haiku"
     timeout: 600
+    catchup: "always" | "same-day" | "never"   # missed-slot catch-up runs; default: always
     skip_permissions: false     # --dangerously-skip-permissions
     tags: [daily, health]
 ```
+
+Catch-ups (`catchup.ts`, wired to the engine in `catchup-wiring.ts`): a slot that did not run (sleep, daemon down, overlap, or a node-cron tick dropped for firing 1 s late) gets one catch-up run, found at startup, after a sleep gap, and by a 30 s missed-tick check. A job has at most one catch-up queued at a time, dropped if the job runs anyway (any trigger) before its turn. `same-day` skips a catch-up that would start on a later local date than its slot. Jobs get `SCHEDULER_TRIGGER` (`scheduled`/`manual`/`catchup`) and, for catch-ups, `SCHEDULER_CATCHUP_FOR` (the missed slot, ISO).
 
 ## Daemon API Endpoints
 
 - `GET /api/health` — status, PID, active jobs
 - `GET /api/jobs` — job list with `isActive` flag
-- `GET /api/runs?job=&status=&limit=` — filtered run list
+- `GET /api/runs?job=&status=&trigger=&limit=` — filtered run list (`trigger`: `scheduled` | `manual` | `catchup`; any other value is a 400)
 - `GET /api/runs/:jobId/:runId/log?offset=` — incremental log content
 - `GET /api/runs/:jobId/:runId/graph` — run diagram data (from `trace.jsonl`; reconstructed from `output.log` for older and script runs)
 - `POST /api/runs/:jobId/trigger` — manual job trigger

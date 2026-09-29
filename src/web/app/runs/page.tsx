@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { RunsTable } from "@/components/runs-table";
 import { getRuns, getJobs, type RunResponse, type JobResponse } from "@/lib/api-client";
 import { COST_DISCLAIMER } from "@/lib/cost-format";
+import { isCatchupRun } from "@/lib/catchup-runs";
 
 export default function RunHistoryPage(): React.ReactElement {
   return <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">Loading runs…</p>}><RunHistoryContent /></Suspense>;
@@ -17,13 +18,28 @@ function RunHistoryContent(): React.ReactElement {
   const [runs, setRuns] = useState<RunResponse[]>([]);
   const [jobs, setJobs] = useState<JobResponse[]>([]);
   const jobFilter = searchParams.get("job") || null;
+  // ?trigger=catchup is where the sidebar pill and the dashboard's catch-up panel link to.
+  const catchupOnly = searchParams.get("trigger") === "catchup";
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
-  const setJobFilter = (jobId: string | null): void => {
+  const replaceQuery = (edit: (query: URLSearchParams) => void): void => {
     const query = new URLSearchParams(searchParams.toString());
-    if (jobId) query.set("job", jobId);
-    else query.delete("job");
+    edit(query);
     router.replace(`/runs${query.size ? `?${query}` : ""}`, { scroll: false });
+  };
+
+  const setJobFilter = (jobId: string | null): void => {
+    replaceQuery((query) => {
+      if (jobId) query.set("job", jobId);
+      else query.delete("job");
+    });
+  };
+
+  const setCatchupOnly = (on: boolean): void => {
+    replaceQuery((query) => {
+      if (on) query.set("trigger", "catchup");
+      else query.delete("trigger");
+    });
   };
 
   const fetchAll = useCallback(async () => {
@@ -32,12 +48,14 @@ function RunHistoryContent(): React.ReactElement {
         limit: 200,
         ...(jobFilter ? { job: jobFilter } : {}),
         ...(statusFilter ? { status: statusFilter } : {}),
+        ...(catchupOnly ? { trigger: "catchup" as const } : {}),
       }).catch(() => []),
       getJobs().catch(() => []),
     ]);
-    setRuns(r);
+    // A daemon started before ?trigger= existed ignores it, so filter here too.
+    setRuns(catchupOnly ? r.filter(isCatchupRun) : r);
     setJobs(j);
-  }, [jobFilter, statusFilter]);
+  }, [jobFilter, statusFilter, catchupOnly]);
 
   useEffect(() => {
     fetchAll();
@@ -57,7 +75,7 @@ function RunHistoryContent(): React.ReactElement {
     return { total, success, partial, failed, timeout, running, followUp };
   }, [runs]);
 
-  const isFiltered = jobFilter !== null || statusFilter !== null;
+  const isFiltered = jobFilter !== null || statusFilter !== null || catchupOnly;
 
   return (
     <div className="space-y-3 max-w-5xl">
@@ -78,7 +96,13 @@ function RunHistoryContent(): React.ReactElement {
             variant="ghost"
             size="sm"
             className="text-[11px] h-5 px-1.5 text-muted-foreground ml-auto"
-            onClick={() => { setJobFilter(null); setStatusFilter(null); }}
+            onClick={() => {
+              replaceQuery((query) => {
+                query.delete("job");
+                query.delete("trigger");
+              });
+              setStatusFilter(null);
+            }}
           >
             clear
           </Button>
@@ -155,6 +179,21 @@ function RunHistoryContent(): React.ReactElement {
             );
           })}
         </div>
+
+        {/* Catch-up filter */}
+        <button
+          type="button"
+          aria-pressed={catchupOnly}
+          onClick={() => setCatchupOnly(!catchupOnly)}
+          className={`inline-flex min-h-[24px] items-center gap-1 rounded px-1.5 text-[12px] transition-colors ${
+            catchupOnly
+              ? "bg-secondary text-blue-700 dark:text-blue-400"
+              : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+          }`}
+        >
+          <span aria-hidden="true">↻</span>
+          Catch-ups
+        </button>
       </div>
 
       {/* Run list */}

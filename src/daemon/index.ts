@@ -5,8 +5,8 @@ import express0 from "express";
 import { loadConfig } from "./config";
 import { CronEngine } from "./cron-engine";
 import { createApp } from "./api";
-import { getDaemonJsonPath, getRunsDir, getStatusPath, getLatestRunStartedAt } from "@shared/paths";
-import { CatchupQueue, detectMissedRun } from "./catchup";
+import { getDaemonJsonPath, getRunsDir, getStatusPath } from "@shared/paths";
+import { startCatchup } from "./catchup-wiring";
 import { listenExclusive, PortInUseError } from "./single-instance";
 import { backfillActivityHistory, discardProvisionalRunStats } from "./stats";
 import type { DaemonHealth, RunStatusFile } from "@shared/types";
@@ -30,7 +30,11 @@ function writeDaemonJson(startedAt: string, port: number): void {
   fs.writeFileSync(daemonJsonPath, JSON.stringify(health, null, 2));
 }
 
-function startHeartbeat(engine: CronEngine, startedAt: string, port: number): NodeJS.Timeout {
+function startHeartbeat(
+  engine: CronEngine,
+  startedAt: string,
+  port: number,
+): NodeJS.Timeout {
   return setInterval(() => {
     const daemonJsonPath = getDaemonJsonPath(PROJECT_ROOT);
     const health: DaemonHealth = {
@@ -73,7 +77,9 @@ function watchConfig(engine: CronEngine): void {
       const result = loadConfig(CONFIG_PATH);
       if (result.success) {
         engine.loadJobs(result.data);
-        console.log(`[daemon] Reloaded config: ${Object.keys(result.data.jobs).length} jobs`);
+        console.log(
+          `[daemon] Reloaded config: ${Object.keys(result.data.jobs).length} jobs`,
+        );
       } else {
         console.error(`[daemon] Config reload failed: ${result.error}`);
       }
@@ -96,7 +102,9 @@ function cleanupOrphanedRuns(projectRoot: string): void {
       if (!fs.existsSync(statusPath)) continue;
 
       try {
-        const status: RunStatusFile = JSON.parse(fs.readFileSync(statusPath, "utf-8"));
+        const status: RunStatusFile = JSON.parse(
+          fs.readFileSync(statusPath, "utf-8"),
+        );
         if (status.status === "running") {
           discardProvisionalRunStats(projectRoot, jobId, runId);
           const updated: RunStatusFile = {
@@ -114,7 +122,9 @@ function cleanupOrphanedRuns(projectRoot: string): void {
   }
 
   if (cleaned > 0) {
-    console.log(`[daemon] Cleaned up ${cleaned} orphaned run(s) from previous session`);
+    console.log(
+      `[daemon] Cleaned up ${cleaned} orphaned run(s) from previous session`,
+    );
   }
 }
 
@@ -162,39 +172,16 @@ async function main(): Promise<void> {
   const engine = new CronEngine(PROJECT_ROOT);
   engine.loadJobs(configResult.data);
 
-  const catchupQueue = new CatchupQueue({
-    runCatchup: async (jobId, slot) => {
-      await engine.runCatchup(jobId, slot);
-    },
-    isJobActive: (jobId) => engine.getActiveJobIds().includes(jobId),
-    jobName: (jobId) => engine.getCurrentConfig()?.jobs[jobId]?.name ?? jobId,
-  });
-  engine.setCatchupQueue(catchupQueue);
+  // Catch-up queue plus missed-slot sweeps: at startup, after a clock gap (sleep) and
+  // every 30 s for ticks node-cron dropped (catchup-wiring.ts).
+  const catchup = startCatchup(engine, { projectRoot: PROJECT_ROOT });
 
-  const now = new Date();
-  let enqueuedCount = 0;
-  for (const [jobId, jobConfig] of Object.entries(configResult.data.jobs)) {
-    if (!jobConfig.enabled) continue;
-    const lastStartedAt = getLatestRunStartedAt(PROJECT_ROOT, jobId);
-    const missed = detectMissedRun({
-      schedule: jobConfig.schedule,
-      lastStartedAt,
-      now,
-      isActive: engine.getActiveJobIds().includes(jobId),
-    });
-    if (missed) {
-      catchupQueue.enqueue(jobId, missed);
-      enqueuedCount += 1;
-      console.log(`[catchup] Enqueued ${jobId} for missed slot ${missed.toISOString()}`);
-    }
-  }
-  if (enqueuedCount > 0) {
-    console.log(`[catchup] ${enqueuedCount} catch-up(s) queued from startup detection`);
-    catchupQueue.process();
-  }
-
-  console.log(`[daemon] Loaded ${Object.keys(configResult.data.jobs).length} jobs`);
-  console.log(`[daemon] Scheduled: ${engine.getRegisteredJobIds().join(", ") || "(none)"}`);
+  console.log(
+    `[daemon] Loaded ${Object.keys(configResult.data.jobs).length} jobs`,
+  );
+  console.log(
+    `[daemon] Scheduled: ${engine.getRegisteredJobIds().join(", ") || "(none)"}`,
+  );
 
   // The port was already claimed above; attach the real routes to it now.
   const app = createApp(engine, PROJECT_ROOT, startedAt);
@@ -209,12 +196,15 @@ async function main(): Promise<void> {
     console.log("\n[daemon] Shutting down...");
     engine.stopAll();
     clearInterval(heartbeatInterval);
+    catchup.stop();
     server.close();
 
     const daemonJsonPath = getDaemonJsonPath(PROJECT_ROOT);
     try {
       fs.unlinkSync(daemonJsonPath);
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
 
     process.exit(0);
   };

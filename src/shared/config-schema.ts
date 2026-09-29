@@ -11,6 +11,9 @@ const jobSchema = z.object({
   model: z.string().optional(),
   timeout: z.number().positive().optional(),
   max_retries: z.number().int().min(0).optional(),
+  // "same-day": skip a catch-up that would start on a later local date than the missed
+  // slot (for jobs that act on "today"/"tomorrow"). Unset behaves as "always".
+  catchup: z.enum(["always", "same-day", "never"]).optional(),
   skip_permissions: z.boolean().default(false),
   tags: z.array(z.string()).default([]),
 }).refine(

@@ -341,6 +341,55 @@ describe("runJob catchupFor", () => {
   });
 });
 
+describe("runJob scheduler env", () => {
+  // A job can act on the slot's date deterministically instead of "today" (2026-09-28:
+  // next-morning catch-ups of pre-meeting-prep / executive-review worked on the wrong day).
+  const printEnv = [
+    "-c",
+    'echo "trigger=$SCHEDULER_TRIGGER catchupFor=${SCHEDULER_CATCHUP_FOR-unset}"',
+  ];
+  const logOf = (runId: string): string =>
+    fs.readFileSync(
+      path.join(tmpDir, "data", "runs", "test-job", runId, "output.log"),
+      "utf-8",
+    );
+
+  it("passes a catch-up run its trigger and the missed slot", async () => {
+    const run = await runJob({
+      jobId: "test-job",
+      jobConfig: testJob,
+      projectRoot: tmpDir,
+      trigger: "catchup",
+      catchupFor: "2026-09-16T15:00:00.000Z",
+      command: "sh",
+      args: printEnv,
+    });
+    expect(logOf(run.runId)).toContain(
+      "trigger=catchup catchupFor=2026-09-16T15:00:00.000Z",
+    );
+  });
+
+  it.each(["scheduled", "manual"] as const)(
+    "passes a %s run its trigger and no SCHEDULER_CATCHUP_FOR, even one the daemon inherited",
+    async (trigger) => {
+      process.env.SCHEDULER_CATCHUP_FOR = "2026-01-01T00:00:00.000Z";
+      try {
+        const run = await runJob({
+          jobId: "test-job",
+          jobConfig: testJob,
+          projectRoot: tmpDir,
+          trigger,
+          command: "sh",
+          args: printEnv,
+        });
+        expect(logOf(run.runId)).toContain(`trigger=${trigger} catchupFor=unset`);
+      } finally {
+        delete process.env.SCHEDULER_CATCHUP_FOR;
+      }
+    },
+  );
+});
+
 describe("runJob maxRetries", () => {
   // A command that increments a counter file and exits based on the attempt
   // number. Lets a test assert exactly how many attempts ran.

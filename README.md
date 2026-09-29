@@ -168,9 +168,16 @@ jobs:
     enabled: true
     model: sonnet                         # optional: sonnet, opus, haiku
     timeout: 600                          # optional: override default
+    catchup: same-day                     # optional: always (default), same-day, never
     skip_permissions: true                # optional: --dangerously-skip-permissions
     tags: [daily, health]                 # optional: for filtering in the UI
 ```
+
+#### Missed runs and catch-ups
+
+If a slot does not run (the machine slept, the daemon was down, the previous run was still going, or node-cron dropped a tick that fired a second late), the daemon runs one catch-up per job for the latest missed slot of the last 24h. It checks at startup, after a sleep gap, and every 30s. A job has at most one catch-up queued at a time, and a queued catch-up is dropped if the job runs anyway (on schedule or manually) before its turn. A catch-up run gets `SCHEDULER_TRIGGER=catchup` and `SCHEDULER_CATCHUP_FOR=<missed slot, ISO>`. Scheduled and manual runs get `SCHEDULER_TRIGGER=scheduled|manual` and no `SCHEDULER_CATCHUP_FOR`. Use it to work on the slot's date instead of "today".
+
+`catchup: same-day` suits jobs that act on "today" or "tomorrow". It skips a catch-up that would start on a later local calendar date than its missed slot. `catchup: never` skips every catch-up. Skips are logged in the daemon log.
 
 ### Cron Expression Reference
 
@@ -200,6 +207,7 @@ The dashboard at http://localhost:3500 shows:
 - **Dashboard** — stat cards, recent runs, job overview with manual trigger buttons
 - **Jobs** — full job list with tag filtering and "Run now" buttons
 - **Run History** — filterable table of all runs across all jobs
+- **Catch-ups** — a run that caught up a missed slot carries a "↻ caught up" badge whose tooltip names the slot and how late it started. The dashboard's **Caught-up runs** section lists what is waiting or running now and the catch-ups of the last 7 days; while catch-ups are waiting or running, the sidebar shows "↻ N" next to Runs. Both link to Run History filtered by **↻ Catch-ups** (`/runs?trigger=catchup`). Restart the daemon so `GET /api/runs` accepts `?trigger=`; until then the UI filters in the browser, over the latest runs only.
 - **Log Viewer** — click any run to see its output (live-tailing for active runs)
 - **Run Diagram** — the run page's **Diagram** tab (`?view=diagram`) shows what the run did: each step, its tool calls with outcome and timing, errors with their messages, subagents nested under the call that spawned them, retries, and the final result. It updates live while the run is going. Claude runs recorded before tracing, and script runs, are reconstructed from `output.log` (script runs are split into sections on `=== title ===` lines); the view says when outcomes or nesting were not recorded. Restart the daemon after installing this code so new runs are traced and the `GET /api/runs/:jobId/:runId/graph` endpoint exists.
 - **Config** — read-only view of the current `scheduler.yaml`

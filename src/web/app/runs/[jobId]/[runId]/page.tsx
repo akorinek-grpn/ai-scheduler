@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LogViewer } from "@/components/log-viewer";
 import { RunDiagram } from "@/components/run-diagram";
 import { RunCostDetails } from "@/components/run-cost-details";
+import { CatchupBadge } from "@/components/catchup-badge";
 import { ApiError, getRun, getRuns, type RunResponse } from "@/lib/api-client";
 
 type RunView = "output" | "diagram";
@@ -138,6 +139,7 @@ function RunDetailContent(): React.ReactElement {
             {run.status}
           </Badge>
         )}
+        {run?.trigger === "catchup" && <CatchupBadge run={run} />}
         <div className="flex items-center gap-1 ml-auto">
           {run?.finishedAt && (
             <span className="text-xs text-muted-foreground mr-3">

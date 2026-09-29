@@ -51,6 +51,8 @@ src/
 │   ├── api.ts                  # REST API: /api/health, /jobs, /runs, /reload, /trigger
 │   ├── config.ts               # YAML loader with Zod validation
 │   ├── cron-engine.ts          # Job scheduling, overlap prevention, hot-reload
+│   ├── catchup.ts              # Missed-slot detection and the catch-up queue
+│   ├── catchup-wiring.ts       # Wires queue + startup/wake/30s sweeps to the engine
 │   ├── job-runner.ts           # Spawns child processes, parses stream-json output
 │   ├── run-trace.ts            # stream-json -> normalized trace.jsonl (Diagram data)
 │   ├── run-graph-reader.ts     # Picks trace.jsonl or output.log and builds the run graph
@@ -123,6 +125,12 @@ src/
 
 Activity totals are derived from the durable per-run ledger, merged by job/run identity with retained provisional runs. The ledger survives log retention, supports idempotent imports and corrections, and retains UTC start-date attribution and per-tool counts. Startup imports available retained history before scheduling jobs; activity API reads reconcile it again. Persistence failures prevent pruning the affected source runs. No previously deleted activity or additional AI-call coverage is inferred.
 
+### Missed Runs (Catch-up)
+
+A slot that did not run gets one catch-up run (`trigger: catchup`, `catchupFor` = the missed slot), queued in `catchup.ts` and run one at a time. Causes include a sleeping machine, a stopped daemon, a still-running previous run, and a node-cron tick dropped for firing 1 s or more late. Detection runs at startup, after a clock gap (sleep), and every 30s for slots of each job's current cron task. The 30s check is needed because node-cron 4 neither replays a dropped tick nor always reports it. A slot counts as run once any run of the job started at or after it, including one still running or left orphaned by a restart (the newest run directory, not the `latest` symlink, which moves only on completion). Only slots node-cron itself fires count: it ANDs day-of-month and day-of-week, where standard cron (and cron-parser) ORs them. Each slot is queued at most once, and a job has at most one catch-up queued at a time (a later missed slot replaces it). A queued catch-up is dropped if the job runs anyway before its turn: any run that started at or after its slot, even one still running. The per-job `catchup` policy applies when a catch-up is queued and again when it starts: `always` (default), `same-day` (skip if it would start on a later local date than the slot), or `never`. Jobs receive `SCHEDULER_TRIGGER` and, for catch-ups, `SCHEDULER_CATCHUP_FOR`.
+
+Known limits: the queue runs catch-ups one at a time and waits while its head entry's job is still active, so a long run's overlap entry delays other jobs' catch-ups.
+
 ### Timeout Handling
 
 - Configurable per-job via `timeout` (seconds), falls back to `defaults.timeout`
@@ -151,6 +159,7 @@ jobs:
     model: sonnet
     skip_permissions: true
     timeout: 300
+    catchup: same-day           # always (default) | same-day | never
     enabled: true
     tags: [daily, ai]
 
@@ -171,6 +180,7 @@ jobs:
 - Schedule validated as valid cron expression
 - Timeout must be positive number
 - Tags default to empty array, enabled defaults to true
+- `catchup` is optional: `always`, `same-day` or `never` (unset behaves as `always`)
 
 ### Hot Reload
 
@@ -185,7 +195,7 @@ Config changes are picked up two ways:
 | `GET` | `/api/health` | Daemon status, PID, uptime, active jobs |
 | `GET` | `/api/jobs` | All jobs with current config and active state |
 | `PATCH` | `/api/jobs/:jobId` | Enable/disable a job (modifies scheduler.yaml) |
-| `GET` | `/api/runs` | Run history with `?job=`, `?status=`, `?limit=` filters |
+| `GET` | `/api/runs` | Run history with `?job=`, `?status=`, `?trigger=` (`scheduled`, `manual` or `catchup`; anything else is a 400), `?limit=` filters |
 | `GET` | `/api/runs/:jobId/:runId/log` | Incremental log read with `?offset=` for streaming |
 | `GET` | `/api/runs/:jobId/:runId/graph` | Run diagram graph: from `trace.jsonl`, or reconstructed from `output.log` for older and script runs |
 | `POST` | `/api/runs/:jobId/trigger` | Manually trigger a job |

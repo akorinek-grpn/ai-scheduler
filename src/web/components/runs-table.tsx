@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { RunResponse, RunEvaluation } from "@/lib/api-client";
 import { CostValue } from "./cost-value";
 import { ModelLabels } from "./model-labels";
+import { CatchupBadge } from "./catchup-badge";
 import { getExecutionModels } from "../../shared/model-usage";
 
 interface RunsTableProps {
@@ -171,18 +172,7 @@ function RunRow({ run }: { run: RunResponse }): React.ReactElement {
       {run.trigger === "manual" && (
         <span className="text-[10px] text-muted-foreground shrink-0">manual</span>
       )}
-      {run.trigger === "catchup" && (
-        <span
-          className="text-[10px] text-blue-500 shrink-0 flex items-center gap-0.5"
-          title={
-            run.catchupFor
-              ? `Catch-up for missed slot at ${new Date(run.catchupFor).toLocaleString()}`
-              : "Catch-up run"
-          }
-        >
-          <span aria-hidden="true">↻</span> catch-up
-        </span>
-      )}
+      {run.trigger === "catchup" && <CatchupBadge run={run} />}
 
       {/* Duration */}
       <span className="text-[12px] font-mono text-muted-foreground tabular-nums w-[52px] text-right shrink-0">

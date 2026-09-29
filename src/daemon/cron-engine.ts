@@ -9,6 +9,8 @@ import type { CatchupQueue } from "./catchup";
 export class CronEngine {
   private projectRoot: string;
   private tasks: Map<string, ScheduledTask> = new Map();
+  /** When each job's current cron task was created (see getScheduledSince). */
+  private scheduledSince: Map<string, Date> = new Map();
   private activeJobs: Set<string> = new Set();
   private currentConfig: SchedulerConfig | null = null;
   private catchupQueue: CatchupQueue | null = null;
@@ -23,6 +25,7 @@ export class CronEngine {
       if (!config.jobs[jobId] || !config.jobs[jobId].enabled) {
         task.stop();
         this.tasks.delete(jobId);
+        this.scheduledSince.delete(jobId);
       }
     }
 
@@ -41,24 +44,50 @@ export class CronEngine {
         this.tasks.delete(jobId);
       }
 
-      const task = cron.schedule(jobConfig.schedule, () => {
-        void this.executeJob(jobId, jobConfig, config);
+      // The tick resolves the job's config at fire time, not at schedule time
+      // (2026-09-28): loadJobs keeps an existing task when only the prompt, model,
+      // timeout or directory changed, so a closure over `jobConfig` ran the OLD
+      // prompt until the schedule changed or the daemon restarted - while the
+      // hot-reload log said "Reloaded config".
+      // ctx.date is the slot node-cron matched (to the second).
+      const task = cron.schedule(jobConfig.schedule, (ctx) => {
+        void this.executeJob(jobId, ctx.date);
       });
 
       this.tasks.set(jobId, task);
+      this.scheduledSince.set(jobId, new Date());
     }
 
     this.currentConfig = config;
   }
 
+  /** The config a scheduled tick should run with: whatever was loaded most recently. */
+  private resolveJob(
+    jobId: string,
+  ): { jobConfig: JobConfig; config: SchedulerConfig } | null {
+    const config = this.currentConfig;
+    const jobConfig = config?.jobs[jobId];
+    if (!config || !jobConfig || !jobConfig.enabled) return null;
+    return { jobConfig, config };
+  }
+
   private async executeJob(
     jobId: string,
-    jobConfig: JobConfig,
-    config: SchedulerConfig,
+    slot: Date = new Date(),
   ): Promise<void> {
+    const resolved = this.resolveJob(jobId);
+    if (!resolved) {
+      console.warn(
+        `[cron] Skipping ${jobId} — no longer in the loaded config or disabled`,
+      );
+      return;
+    }
+    const { jobConfig, config } = resolved;
     if (this.activeJobs.has(jobId)) {
       console.warn(`[cron] Skipping ${jobId} — previous run still active`);
-      this.catchupQueue?.enqueue(jobId, new Date());
+      // Queued under the tick's own slot: if that run is already a catch-up of this
+      // slot (a sweep got there first), the queue refuses it instead of running it twice.
+      this.catchupQueue?.enqueue(jobId, slot);
       return;
     }
 
@@ -205,6 +234,15 @@ export class CronEngine {
     }
   }
 
+  /**
+   * When the job's current cron task was scheduled, or null if it has none. node-cron can
+   * only have fired (or dropped) the job's slots from then on, so the missed-tick check
+   * ignores earlier ones: a job added or re-enabled at 14:05 does not catch up 14:00.
+   */
+  getScheduledSince(jobId: string): Date | null {
+    return this.scheduledSince.get(jobId) ?? null;
+  }
+
   getRegisteredJobIds(): string[] {
     return Array.from(this.tasks.keys());
   }
@@ -222,5 +260,6 @@ export class CronEngine {
       task.stop();
     }
     this.tasks.clear();
+    this.scheduledSince.clear();
   }
 }

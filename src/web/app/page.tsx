@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { StatsCards } from "@/components/stats-cards";
+import { CatchupRunsPanel } from "@/components/catchup-runs";
 import { RunsTable } from "@/components/runs-table";
 import { JobCard } from "@/components/job-card";
 import { AiInsights } from "@/components/ai-insights";
@@ -62,19 +63,22 @@ export default function DashboardPage(): React.ReactElement {
   const [jobs, setJobs] = useState<JobResponse[]>([]);
   const [runs, setRuns] = useState<RunResponse[]>([]);
   const [catchups, setCatchups] = useState<CatchupQueueSnapshot | null>(null);
+  const [catchupRuns, setCatchupRuns] = useState<RunResponse[]>([]);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [h, j, r, c] = await Promise.all([
+      const [h, j, r, c, cr] = await Promise.all([
         getHealth().catch(() => null),
         getJobs().catch(() => []),
         getRuns({ limit: 200 }).catch(() => []),
         getCatchupQueue().catch(() => null),
+        getRuns({ trigger: "catchup", limit: 50 }).catch(() => []),
       ]);
       setHealth(h);
       setJobs(j);
       setRuns(r);
       setCatchups(c);
+      setCatchupRuns(cr);
     } catch {
       // silently fail
     }
@@ -93,7 +97,10 @@ export default function DashboardPage(): React.ReactElement {
 
   return (
     <div className="space-y-5 max-w-6xl">
-      <StatsCards jobs={jobs} runs={runs} health={health} catchups={catchups} />
+      <StatsCards jobs={jobs} runs={runs} health={health} />
+
+      {/* The panel keeps only catch-ups; the recent runs are merged in for a daemon that ignores ?trigger=. */}
+      <CatchupRunsPanel runs={catchupRuns.concat(runs)} queue={catchups} />
 
       <LifetimeActivity />
 

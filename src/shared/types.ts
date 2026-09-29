@@ -2,6 +2,8 @@ import type { RunCostSummary } from "./cost-types";
 
 export type RunStatus = "running" | "success" | "partial" | "failed" | "timeout";
 export type TriggerType = "scheduled" | "manual" | "catchup";
+/** scheduler.yaml `catchup`: which missed slots get a catch-up run. Unset means "always". */
+export type CatchupPolicy = "always" | "same-day" | "never";
 
 export interface JobConfig {
   name: string;
@@ -14,6 +16,7 @@ export interface JobConfig {
   model?: string;
   timeout?: number;
   max_retries?: number;
+  catchup?: CatchupPolicy;
   skip_permissions?: boolean;
   tags: string[];
 }

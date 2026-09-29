@@ -66,3 +66,33 @@ export function getLatestRunStartedAt(projectRoot: string, jobId: string): strin
     return null;
   }
 }
+
+// job-runner's run ids start with the run's UTC start time (YYYY-MM-DDTHH-MM-SS-<hex>),
+// so the greatest id is the most recently started run.
+const RUN_ID_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/;
+
+/**
+ * Start time of the job's most recently started run, including one still running or one a
+ * previous daemon left orphaned. The `latest` symlink moves only when a run completes, so
+ * getLatestRunStartedAt misses those. Falls back to `latest` when the newest run directory
+ * has no readable meta.json.
+ */
+export function getNewestRunStartedAt(projectRoot: string, jobId: string): string | null {
+  let newest: string | undefined;
+  try {
+    for (const name of fs.readdirSync(getJobDir(projectRoot, jobId))) {
+      if (RUN_ID_RE.test(name) && (newest === undefined || name > newest)) newest = name;
+    }
+  } catch {
+    return null;
+  }
+  if (newest !== undefined) {
+    try {
+      const meta = JSON.parse(fs.readFileSync(getMetaPath(projectRoot, jobId, newest), "utf-8"));
+      if (typeof meta?.startedAt === "string") return meta.startedAt;
+    } catch {
+      // unreadable: fall back to the last completed run
+    }
+  }
+  return getLatestRunStartedAt(projectRoot, jobId);
+}

@@ -70,6 +70,45 @@ describe("configSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  it("accepts a per-job catchup policy and leaves it unset by default", () => {
+    const job = (extra: Record<string, unknown>) => ({
+      version: 1,
+      jobs: {
+        j: {
+          name: "J",
+          schedule: "0 17 * * 0-4",
+          directory: "/tmp",
+          prompt: "p",
+          ...extra,
+        },
+      },
+    });
+    for (const policy of ["always", "same-day", "never"]) {
+      const result = configSchema.safeParse(job({ catchup: policy }));
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.jobs.j.catchup).toBe(policy);
+    }
+    const unset = configSchema.safeParse(job({}));
+    expect(unset.success).toBe(true);
+    if (unset.success) expect(unset.data.jobs.j.catchup).toBeUndefined();
+  });
+
+  it("rejects an unknown catchup policy", () => {
+    const input = {
+      version: 1,
+      jobs: {
+        j: {
+          name: "J",
+          schedule: "0 17 * * 0-4",
+          directory: "/tmp",
+          prompt: "p",
+          catchup: "next-day",
+        },
+      },
+    };
+    expect(configSchema.safeParse(input).success).toBe(false);
+  });
+
   it("accepts empty jobs object", () => {
     const input = { version: 1, jobs: {} };
     const result = configSchema.safeParse(input);

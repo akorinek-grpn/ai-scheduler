@@ -88,11 +88,14 @@ export function getJobs(): Promise<JobResponse[]> {
 export function getRuns(params?: {
   job?: string;
   status?: string;
+  trigger?: RunResponse["trigger"];
   limit?: number;
 }): Promise<RunResponse[]> {
   const searchParams = new URLSearchParams();
   if (params?.job) searchParams.set("job", params.job);
   if (params?.status) searchParams.set("status", params.status);
+  // A daemon started before this parameter existed ignores it, so callers also filter client-side.
+  if (params?.trigger) searchParams.set("trigger", params.trigger);
   if (params?.limit) searchParams.set("limit", params.limit.toString());
   const qs = searchParams.toString();
   return fetchApi(`/runs${qs ? `?${qs}` : ""}`);

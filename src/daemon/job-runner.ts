@@ -253,6 +253,13 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
   const toolsByName: Record<string, number> = {};
   let toolCalls = 0;
 
+  // SCHEDULER_TRIGGER and, for a catch-up, SCHEDULER_CATCHUP_FOR (the missed slot, ISO)
+  // let a job work on the slot's date instead of "today": a catch-up can start the next
+  // morning. Never pass on a SCHEDULER_CATCHUP_FOR inherited by the daemon itself.
+  const jobEnv: NodeJS.ProcessEnv = { ...process.env, SCHEDULER_TRIGGER: trigger };
+  delete jobEnv.SCHEDULER_CATCHUP_FOR;
+  if (catchupFor !== undefined) jobEnv.SCHEDULER_CATCHUP_FOR = catchupFor;
+
   const isAiSession = jobConfig.type !== "script";
   const attemptCosts: AttemptCost[] = [];
   writeEvaluationCost(projectRoot, jobId, runId, "pending");
@@ -290,7 +297,7 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
       const child = spawn(command, args, {
         cwd: jobConfig.directory,
         env: {
-          ...process.env,
+          ...jobEnv,
           SCHEDULER_JOB_ID: jobId,
           SCHEDULER_RUN_ID: runId,
           SCHEDULER_ATTEMPT: String(attempt),

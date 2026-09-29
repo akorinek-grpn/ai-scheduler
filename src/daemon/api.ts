@@ -9,7 +9,9 @@ import { getActivityStats } from "./stats";
 import { emptyCostTotals, getCostStats, getRetainedJobCosts } from "./cost-stats";
 import { listRunSummaries, readRunSummary } from "./run-history";
 import { readRunGraph } from "./run-graph-reader";
-import type { RunStatusFile } from "@shared/types";
+import type { RunStatusFile, TriggerType } from "@shared/types";
+
+const RUN_TRIGGERS: readonly TriggerType[] = ["scheduled", "manual", "catchup"];
 
 export function createApp(engine: CronEngine, projectRoot: string, startedAt: string): express.Express {
   const configPath = path.join(projectRoot, "scheduler.yaml");
@@ -46,9 +48,16 @@ export function createApp(engine: CronEngine, projectRoot: string, startedAt: st
   app.get("/api/runs", (req, res) => {
     const jobFilter = req.query.job as string | undefined;
     const statusFilter = req.query.status as string | undefined;
+    const triggerFilter = req.query.trigger;
     const limit = parseInt(req.query.limit as string) || 50;
+    if (triggerFilter !== undefined && !RUN_TRIGGERS.some((trigger) => trigger === triggerFilter)) {
+      res.status(400).json({ error: `trigger must be one of: ${RUN_TRIGGERS.join(", ")}` });
+      return;
+    }
 
-    const runs = listRunSummaries(projectRoot, jobFilter).filter((run) => !statusFilter || run.status === statusFilter);
+    const runs = listRunSummaries(projectRoot, jobFilter)
+      .filter((run) => !statusFilter || run.status === statusFilter)
+      .filter((run) => triggerFilter === undefined || run.trigger === triggerFilter);
     res.json(runs.slice(0, limit));
   });
 
