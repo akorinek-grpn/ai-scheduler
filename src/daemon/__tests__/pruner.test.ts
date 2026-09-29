@@ -20,8 +20,10 @@ describe("pruneOldRuns", () => {
     for (let i = 1; i <= 5; i++) {
       const runDir = path.join(jobDir, `2026-04-0${i}T09-00-00-abc${i}23`);
       fs.mkdirSync(runDir, { recursive: true });
-      fs.writeFileSync(path.join(runDir, "meta.json"), "{}");
-      fs.writeFileSync(path.join(runDir, "status.json"), "{}");
+      fs.writeFileSync(path.join(runDir, "meta.json"), JSON.stringify({
+        jobId: "test-job", runId: path.basename(runDir), startedAt: `2026-04-0${i}T09:00:00Z`, jobConfig: { type: "claude" },
+      }));
+      fs.writeFileSync(path.join(runDir, "status.json"), JSON.stringify({ status: "success" }));
       fs.writeFileSync(path.join(runDir, "output.log"), "log");
     }
 

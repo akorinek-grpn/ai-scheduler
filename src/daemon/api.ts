@@ -163,8 +163,12 @@ export function createApp(engine: CronEngine, projectRoot: string, startedAt: st
   app.get("/api/stats/activity", (req, res) => {
     const raw = parseInt(req.query.days as string, 10);
     const days = Number.isFinite(raw) ? Math.min(90, Math.max(1, raw)) : 30;
-    const stats = getActivityStats(projectRoot, days);
-    res.json(stats);
+    try {
+      res.json(getActivityStats(projectRoot, days));
+    } catch (error) {
+      console.error("[activity] Could not load activity history:", error);
+      res.status(503).json({ error: "Activity history is unavailable" });
+    }
   });
 
   app.get("/api/stats/costs", (req, res) => {

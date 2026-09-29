@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createApp } from "../api";
 import { CronEngine } from "../cron-engine";
 import fs from "fs";
@@ -6,6 +6,7 @@ import path from "path";
 import os from "os";
 import type { SchedulerConfig } from "@shared/config-schema";
 import type { RunStatusFile, RunMeta } from "@shared/types";
+import { getActivityRecordPath } from "@shared/paths";
 
 async function request(app: ReturnType<typeof createApp>, method: string, url: string): Promise<{ status: number; body: unknown }> {
   return new Promise((resolve) => {
@@ -53,6 +54,7 @@ describe("daemon API", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     engine.stopAll();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -114,6 +116,16 @@ describe("daemon API", () => {
   });
 
   describe("GET /api/stats/activity", () => {
+    it("reports unavailable activity rather than zero totals when preserved data is corrupt", async () => {
+      const recordPath = getActivityRecordPath(tmpDir, "test-job", "pruned");
+      fs.mkdirSync(path.dirname(recordPath), { recursive: true });
+      fs.writeFileSync(recordPath, "broken json");
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const app = createApp(engine, tmpDir, new Date().toISOString());
+      const res = await request(app, "GET", "/api/stats/activity");
+      expect(res).toEqual({ status: 503, body: { error: "Activity history is unavailable" } });
+    });
+
     it("returns lifetime + daily stats with default 30-day window", async () => {
       const app = createApp(engine, tmpDir, new Date().toISOString());
       const res = await request(app, "GET", "/api/stats/activity");

@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { AttemptCost } from "@shared/cost-types";
 import { CostTracker, writeEvaluationCost, writeRunCost } from "./costs";
+import { preserveRunActivity } from "./stats";
 import type {
   JobConfig,
   TriggerType,
@@ -249,7 +250,7 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
   writeEvaluationCost(projectRoot, jobId, runId, "pending");
 
   const writeStats = (): void => {
-    const stats: RunStats = { toolCalls, toolsByName, isAiSession };
+    const stats: RunStats = { toolCalls, toolsByName, isAiSession, finalized: true };
     fs.writeFileSync(
       getStatsPath(projectRoot, jobId, runId),
       JSON.stringify(stats, null, 2),
@@ -429,11 +430,12 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
     startedAt: meta.startedAt,
     finishedAt: new Date().toISOString(),
   };
+  writeStats();
   fs.writeFileSync(
     getStatusPath(projectRoot, jobId, runId),
     JSON.stringify(finalStatus, null, 2),
   );
-  writeStats();
+  preserveRunActivity(projectRoot, jobId, runId);
 
   const symlinkPath = getLatestSymlink(projectRoot, jobId);
   try {

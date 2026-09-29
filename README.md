@@ -41,6 +41,19 @@ Data flows through the filesystem:
 scheduler.yaml → Daemon → data/runs/ → Web UI
 ```
 
+## Activity History
+
+The Dashboard's Lifetime Activity totals and daily trend use a durable activity ledger in `data/activity/<job-id>/<run-id>.json`, separate from retained run logs. Each small record contains the run identity, start time, AI-session flag, tool-call count, and per-tool counts; it does not copy prompts or logs. Keep this directory in backups.
+
+- Completed runs are recorded automatically, even when the Dashboard is never opened. Retries contribute their combined tool count to one run record, not extra sessions.
+- Existing retained runs are imported on daemon startup and reconciled on activity reads. Repeated imports replace the same run record rather than double-counting it. Already-pruned history cannot be recovered.
+- Before pruning a run, the daemon must successfully preserve its activity. Running, unreadable, or unpreservable runs are kept for a later attempt. Activity records are atomically replaced and are not subject to `retain_runs`.
+- Lifetime totals, daily UTC buckets, and top-tool counts survive log pruning and daemon restarts. In-progress runs remain provisional until completion. Invalid preserved records produce an error rather than silently reporting smaller totals.
+- Running-log backfills are not persisted. Native counters are marked finalized and written before terminal status; recovery discards old provisional caches before importing interrupted runs. A valid preserved record takes precedence over log reconstruction when native stats are damaged or missing.
+- Coverage is unchanged: sessions mean native Claude job runs, including failed runs; script-internal AI calls and evaluator calls are not included. Historical tool-count limitations are not repaired by this migration. Cost dashboards still cover retained history only.
+
+Restart the daemon after upgrading to activate automatic activity preservation and import the available history.
+
 ## Costs and Usage
 
 The Dashboard shows reported USD costs for today, this month, and retained history, plus a 7/30/90-day daily trend and job ranking. Daily and monthly boundaries use **UTC**. Jobs show totals across their retained runs; run details break down execution, retries, script tasks, evaluator overhead, and reported model/token usage.
@@ -201,6 +214,8 @@ All runtime data lives in `data/` (gitignored):
 ```
 data/
 ├── daemon.json              # daemon health (pid, port, heartbeat)
+├── activity/
+│   └── <job-id>/<run-id>.json # durable activity counters, never pruned with logs
 ├── runs/
 │   └── <job-id>/
 │       ├── <run-id>/
@@ -211,7 +226,7 @@ data/
 └── daemon.log               # daemon process stdout
 ```
 
-Old runs are automatically pruned based on `retain_runs` in the config.
+Old runs are automatically pruned based on `retain_runs` in the config, after their activity counters have been preserved in `data/activity/`.
 
 ## Installing the Skill
 

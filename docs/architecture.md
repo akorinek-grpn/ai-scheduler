@@ -109,8 +109,10 @@ src/
 6. On exit: writes final status.json (success/failed/timeout)
 7. Updates latest symlink
 8. Async: Evaluator reads output.log, calls Claude Haiku, writes eval.json
-9. Pruner removes oldest runs beyond retain_runs limit
+9. Pruner verifies activity preservation before removing oldest runs beyond retain_runs limit
 ```
+
+Activity totals are derived from the durable per-run ledger, merged by job/run identity with retained provisional runs. The ledger survives log retention, supports idempotent imports and corrections, and retains UTC start-date attribution and per-tool counts. Startup imports available retained history before scheduling jobs; activity API reads reconcile it again. Persistence failures prevent pruning the affected source runs. No previously deleted activity or additional AI-call coverage is inferred.
 
 ### Timeout Handling
 

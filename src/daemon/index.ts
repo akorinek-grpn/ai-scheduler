@@ -8,6 +8,7 @@ import { createApp } from "./api";
 import { getDaemonJsonPath, getRunsDir, getStatusPath, getLatestRunStartedAt } from "@shared/paths";
 import { CatchupQueue, detectMissedRun } from "./catchup";
 import { listenExclusive, PortInUseError } from "./single-instance";
+import { backfillActivityHistory, discardProvisionalRunStats } from "./stats";
 import type { DaemonHealth, RunStatusFile } from "@shared/types";
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
@@ -97,6 +98,7 @@ function cleanupOrphanedRuns(projectRoot: string): void {
       try {
         const status: RunStatusFile = JSON.parse(fs.readFileSync(statusPath, "utf-8"));
         if (status.status === "running") {
+          discardProvisionalRunStats(projectRoot, jobId, runId);
           const updated: RunStatusFile = {
             ...status,
             status: "failed",
@@ -141,6 +143,14 @@ async function main(): Promise<void> {
   }
 
   cleanupOrphanedRuns(PROJECT_ROOT);
+  try {
+    backfillActivityHistory(PROJECT_ROOT);
+  } catch (error) {
+    console.warn(
+      "[activity] History backfill failed; unpreserved runs will not be pruned:",
+      error,
+    );
+  }
 
   const configResult = loadConfig(CONFIG_PATH);
   if (!configResult.success) {

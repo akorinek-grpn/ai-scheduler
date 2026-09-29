@@ -9,6 +9,14 @@ export function getRunsDir(projectRoot: string): string {
   return path.join(projectRoot, "data", "runs");
 }
 
+export function getActivityDir(projectRoot: string): string {
+  return path.join(getDataDir(projectRoot), "activity");
+}
+
+export function getActivityRecordPath(projectRoot: string, jobId: string, runId: string): string {
+  return path.join(getActivityDir(projectRoot), jobId, `${runId}.json`);
+}
+
 export function getJobDir(projectRoot: string, jobId: string): string {
   return path.join(projectRoot, "data", "runs", jobId);
 }

@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { getJobDir } from "@shared/paths";
+import { preserveRunActivity } from "./stats";
 
 export function pruneOldRuns(projectRoot: string, jobId: string, retainCount: number): void {
   const jobDir = getJobDir(projectRoot, jobId);
@@ -18,6 +19,10 @@ export function pruneOldRuns(projectRoot: string, jobId: string, retainCount: nu
 
   const toRemove = entries.slice(0, entries.length - retainCount);
   for (const runId of toRemove) {
+    if (!preserveRunActivity(projectRoot, jobId, runId)) {
+      console.warn(`[pruner] Keeping ${jobId}/${runId}: activity is not safely preserved`);
+      continue;
+    }
     fs.rmSync(path.join(jobDir, runId), { recursive: true, force: true });
   }
 }
