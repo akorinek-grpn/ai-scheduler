@@ -1,12 +1,12 @@
 version: 1
 defaults:
   timeout: 600
-  max_retries: 3
+  max_retries: 1
   retain_runs: 30
 jobs:
   daily-ops:
     name: Daily Ops — Summary, Briefing, Actions & Compliance Refresh
-    schedule: 30 7 * * 1-5
+    schedule: 5 9 * * 1-5
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
@@ -43,41 +43,50 @@ jobs:
       - daily
       - personalized-helper
   meeting-prep:
-    name: Meeting Prep
-    schedule: 45 7 * * 1-5
+    name: Meeting Prep — 1:1 Agendas Due (morning catch-up)
+    schedule: 20 9 * * 1-5
+    catchup: same-day # works on "today"/"tomorrow": a next-day catch-up would do the wrong day
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
-    prompt: |
-      Check today's calendar for upcoming meetings, then run the relevant prep scripts:
-      - For 1:1 meetings: bun run one-on-one
-      - For skip-level meetings: bun run skip-level
-      - For other key meetings: bun run prep
-      Run each applicable script and report what was generated. If no meetings today, just report that.
-      Note: NODE_TLS_REJECT_UNAUTHORIZED=0 should be set for LiteLLM calls.
-    model: sonnet
-    skip_permissions: true
-    timeout: 600
+    type: script
+    command: |
+      # Writes a 1:1 agenda for each direct whose usual 1:1 cadence (from the
+      # Fireflies history) says they are due - no calendar needed. This was a
+      # Claude job that started with "check today's calendar"; Google Calendar
+      # is not connected, so it reported success while producing nothing.
+      # Catches anyone the 17:00 pre-meeting pass missed (machine asleep);
+      # otherwise a no-op, since a fresh agenda blocks regeneration for one
+      # cadence. Recurring-meeting prep runs inside daily-ops (summarize) at 09:05.
+      echo "=== 1:1 agendas due ==="
+      bun run one-on-one --due
+      RC=$?
+      echo "=== Done ==="
+      exit $RC
+    # The first run after the switch clears a backlog (6 directs due on
+    # 2026-09-29, ~2-4 min each); later runs touch one or two.
+    timeout: 2400
     enabled: true
     tags:
       - daily
       - personalized-helper
       - meetings
   pre-meeting-prep:
-    name: Pre-Meeting Prep — Tomorrow's 1:1s & Skip-Levels
+    name: Pre-Meeting Prep — 1:1 Agendas Due Tomorrow
     schedule: 0 17 * * 0-4
+    catchup: same-day # works on "today"/"tomorrow": a next-day catch-up would do the wrong day
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
-    prompt: |
-      Generate prep notes for TOMORROW's important meetings so they're ready first thing.
-      Steps:
-      1. Look at tomorrow's calendar (date in America/Los_Angeles or local timezone — use whichever the helper DB stores).
-      2. For each 1:1 meeting on tomorrow's calendar: run `bun run one-on-one` with the relevant person.
-      3. For each skip-level on tomorrow's calendar: run `bun run skip-level`.
-      4. For other named recurring meetings (staff, planning, review): run `bun run prep`.
-      5. Save each prep file into data/summaries/ with tomorrow's date.
-      6. Report what was generated. If tomorrow has no qualifying meetings, just say so.
-      Note: NODE_TLS_REJECT_UNAUTHORIZED=0 should be set for LiteLLM calls.
-    model: sonnet
-    skip_permissions: true
-    timeout: 900
+    type: script
+    command: |
+      # The evening pass: a direct becomes due one day before their usual
+      # cadence lands, so tomorrow's 1:1 agendas are ready first thing. Same
+      # deterministic script as meeting-prep (was a calendar-driven Claude job).
+      # Skip-level and calendar-based prep (bun run skip-level / prep) need the
+      # calendar and are run by hand until it is connected.
+      echo "=== 1:1 agendas due ==="
+      bun run one-on-one --due
+      RC=$?
+      echo "=== Done ==="
+      exit $RC
+    timeout: 2400
     enabled: true
     tags:
       - daily
@@ -106,10 +115,11 @@ jobs:
       - market-researcher
   market-researcher-weekly-baselines:
     name: Market Researcher — Weekly Baselines (revenue + funnel + category)
-    # 06:00, not 07:00: this BigQuery job can run ~30 min, and weekly-ops (Mon
-    # 07:00) is also heavy. Starting at 06:00 gives a full clear hour so the two
-    # don't contend for the machine at the same instant.
-    schedule: 0 6 * * 1
+    # 10:15 Monday: the laptop is usually asleep or offline before ~09:00 (the
+    # old 06:00 slot missed 2 of 4 Mondays in Sept 2026). This runs after
+    # weekly-ops (Mon 09:30) and well before market-researcher (Mon 12:00),
+    # which reads these baseline tables.
+    schedule: 15 10 * * 1
     directory: /Users/akorinek/Programming/market-researcher
     type: script
     command: |
@@ -132,7 +142,7 @@ jobs:
       - bigquery
   executive-review:
     name: Executive Review — Daily Summary
-    schedule: 5 18 * * 1-5
+    schedule: 45 16 * * 1-5
     directory: /Users/akorinek/Programming/ai-scheduler
     prompt: |
       You are the executive review agent. Review today's scheduled run results and write a summary.
@@ -159,7 +169,7 @@ jobs:
       - review
   weekly-ops:
     name: Weekly Ops — Summary, Compliance & Decisions
-    schedule: 0 7 * * 1
+    schedule: 30 9 * * 1
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
@@ -174,7 +184,7 @@ jobs:
       bun run profile --all || { echo "FAILED: profile"; FAILED=2; }
       echo "=== Done ==="
       exit $FAILED
-    timeout: 1200
+    timeout: 2400
     enabled: true
     tags:
       - weekly
@@ -188,8 +198,10 @@ jobs:
     command: |
       echo "=== Generating Thursday 5/15 draft ==="
       bun run compliance --fresh --with-my-515
+      RC=$?
       echo "=== Done ==="
-    timeout: 900
+      exit $RC
+    timeout: 1500
     enabled: true
     tags:
       - weekly
@@ -203,8 +215,10 @@ jobs:
     command: |
       echo "=== Regenerating Friday 5/15 draft ==="
       bun run compliance --fresh --with-my-515
+      RC=$?
       echo "=== Done ==="
-    timeout: 900
+      exit $RC
+    timeout: 1500
     enabled: true
     tags:
       - weekly
@@ -212,7 +226,7 @@ jobs:
       - five-fifteen
   weekly-515-mon:
     name: My 5/15 Draft — Monday Settled-SEO Backfill
-    schedule: 0 8 * * 1
+    schedule: 45 9 * * 1
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
@@ -226,8 +240,10 @@ jobs:
       done
       echo "=== Backfilling settled 5/15 for week ending $LAST_FRI ==="
       bun run generate-515 --week "$LAST_FRI"
+      RC=$?
       echo "=== Done ==="
-    timeout: 900
+      exit $RC
+    timeout: 1500
     enabled: true
     tags:
       - weekly
@@ -235,7 +251,7 @@ jobs:
       - five-fifteen
   weekly-515-coaching:
     name: 5/15 Coaching Drafts - Mon Review Queue (Tue safety-net)
-    schedule: 30 8 * * 1,2
+    schedule: 0 10 * * 1,2
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
     type: script
     command: |
@@ -243,7 +259,7 @@ jobs:
       # review. POSTS NOTHING: every draft waits on
       # http://localhost:3847/five-fifteens/review for Adam to read, edit, send.
       #
-      # Runs Monday AND Tuesday 08:30. The Tuesday pass is a safety-net: if
+      # Runs Monday AND Tuesday 10:00. The Tuesday pass is a safety-net: if
       # Monday failed (LiteLLM/Asana down, machine asleep) it fills the queue a
       # day late instead of leaving a whole week with no drafts. When Monday
       # succeeded, Tuesday is a no-op - insertDraftIfAbsent skips any (person,
@@ -251,7 +267,9 @@ jobs:
       # so an edited or dismissed draft is never clobbered or resurrected.
       echo "=== Drafting 5/15 coaching comments ==="
       bun run coach-515
+      RC=$?
       echo "=== Done ==="
+      exit $RC
     timeout: 900
     enabled: true
     tags:
@@ -271,7 +289,9 @@ jobs:
       # afternoon-sync (15:00) so transcripts and the week's 5/15 are cached.
       echo "=== Weekly self-coach ==="
       bun run coach-me
+      RC=$?
       echo "=== Done ==="
+      exit $RC
     timeout: 900
     enabled: true
     tags:
@@ -286,7 +306,9 @@ jobs:
     command: |
       echo "=== Team compliance check ==="
       bun run compliance --fresh
+      RC=$?
       echo "=== Done ==="
+      exit $RC
     timeout: 900
     enabled: true
     tags:
@@ -295,7 +317,7 @@ jobs:
       - compliance
   skill-healer:
     name: Skill Healer — Weekly Improvement
-    schedule: 0 3 * * 0
+    schedule: 0 16 * * 5
     directory: /Users/akorinek/Programming
     prompt: |
       Process accumulated session signals and improve Claude Code skills:
@@ -313,21 +335,6 @@ jobs:
       - weekly
       - skills
       - meta
-  eod-report:
-    name: EOD Report — End of Day Update
-    schedule: 0 18 * * 1-5
-    directory: /Users/akorinek/Programming/ai-scheduler
-    prompt: |
-      Read the skill file at ~/.claude/skills/daily-reporting/SKILL.md and follow it exactly.
-      Run in autonomous mode (--auto): skip all interactive prompts, infer from git activity, and post directly.
-    model: sonnet
-    skip_permissions: true
-    timeout: 300
-    enabled: false
-    tags:
-      - daily
-      - eod
-      - reporting
   babysit-prs:
     name: Babysit PRs — Auto-Review Open PRs
     schedule: 0 6-22 * * 1-5
@@ -351,19 +358,33 @@ jobs:
 
       STEP 1 - run the deterministic preflight gate. Your FIRST action is:
 
-        bash ~/.claude/skills/pr-review/scripts/batch-preflight.sh
+        bash ~/.claude/skills/pr-review/scripts/batch-preflight.sh --role review
 
       It performs per-host auth checks, PR discovery, the full decision ladder,
-      budget selection, and writes the batch decision telemetry itself. Read its
-      final "PREFLIGHT_RESULT_JSON:" line:
+      budget selection, and writes the batch decision telemetry itself. `--role review`
+      keeps first-time, requested and new-commits candidates for this job; a
+      `converged` / `converged-static` candidate NEVER appears here - the approve-prs
+      job (opus) owns it, and only that job may post APPROVE on a converged PR. While
+      the skill's scheduled_mode.scope is on, every candidate carries the SEO label or
+      is a PR by the Echelon team on which my review was requested (rule D2), whatever
+      its via (config, reach, requested, label); a team PR nobody requested is skipped
+      `not-requested` and never becomes a candidate. Read its
+      "PREFLIGHT_CANDIDATES:" line, and take the candidates from the file named on its
+      "PREFLIGHT_RESULT_FILE:" line (jq '.candidates' FILE) - never from the
+      "PREFLIGHT_RESULT_JSON:" line, which the tool output truncates at ~2,000 chars:
 
-      - candidates EMPTY -> print the script's decision lines and summary as your
-        run output and STOP. Do NOT read SKILL.md, do NOT call any other tool.
-        This is the expected outcome of most runs.
-      - candidates NON-EMPTY -> proceed to STEP 2 for exactly those PRs.
+      - candidates EMPTY (PREFLIGHT_CANDIDATES: 0) -> print the script's decision
+        lines and summary as your run output and STOP. Do NOT read SKILL.md, do NOT
+        call any other tool. This is the expected outcome of most runs.
+      - candidates NON-EMPTY -> proceed to STEP 2 for exactly those PRs. Pass each
+        candidate's author_in_team to the gate exactly as the file gives it, and post
+        exactly the posted_event the gate returns, whatever your verdict.
       - exit code 2 -> a host was unreachable/unauthenticated. Say WHICH host
         prominently in your summary (this must never look like "no PRs found"),
         then still process any candidates that were emitted.
+      - a SCOPE_STATUS line other than ok / refreshed (stale, unavailable) -> say so
+        prominently in your summary: the team roster from Echelon could not be
+        refreshed, and with `unavailable` no PR qualified by team this run.
 
       STEP 2 - review the preflight candidates by following
       ~/.claude/skills/pr-review/SKILL.md EXACTLY, in scheduled/batch mode with
@@ -403,6 +424,7 @@ jobs:
     # 1500s killed real review batches mid-flight (comments already posted).
     # Hourly schedule + no-overlap guard bound the cost of a long run anyway.
     timeout: 3600
+    max_retries: 0 # hourly: the next run covers a failure; immediate retries only repeat an outage
     enabled: true
     tags:
       - periodic
@@ -414,7 +436,7 @@ jobs:
       - seo
   ai-researcher:
     name: AI Researcher — Run Analysis & Improvement Proposals
-    schedule: 0 5 * * 0
+    schedule: 30 15 * * 5
     directory: /Users/akorinek/Programming/ai-scheduler
     prompt: |
       You are the AI Researcher agent for the ai-scheduler platform. Your job is to analyze
@@ -513,7 +535,7 @@ jobs:
       are the entire output. The web UI at /research surfaces them on the dashboard.
     model: sonnet
     skip_permissions: true
-    timeout: 600
+    timeout: 1200
     enabled: true
     tags:
       - weekly
@@ -606,17 +628,25 @@ jobs:
 
         bash ~/.claude/skills/pr-review/scripts/conversation-preflight.sh
 
-      Read its final "CONVERSATION_RESULT_JSON:" line.
+      Read its "CONVERSATION_PENDING:" line and open the file named on its
+      "CONVERSATION_RESULT_FILE:" line with jq. NEVER read the pending items from
+      the "CONVERSATION_RESULT_JSON:" line: the tool output is truncated at about
+      2,000 characters and that line is routinely 30,000. On 2026-09-28 it hid 11
+      of 12 pending items and the run reported them as already resolved.
 
-      - pending EMPTY and no verdict_state entry with block_lift_eligible true ->
-        print the script's CONV and VERDICT lines and STOP. This is the expected
-        outcome of most runs.
+      - pending EMPTY (CONVERSATION_PENDING: 0) and no verdict_state entry with
+        block_lift_eligible true -> print the script's CONV and VERDICT lines and
+        STOP. This is the expected outcome of most runs.
       - otherwise -> follow
         ~/.claude/skills/pr-review/references/conversation-pass.md EXACTLY for
-        those items, with --auto behavior. That reference is self-contained; do
-        NOT read SKILL.md.
+        EVERY item in the file, with --auto behavior, and end your summary with
+        "acted on N of N". That reference is self-contained; do NOT read SKILL.md.
       - exit code 2 -> a host was unreachable. Name WHICH host in your summary,
         then continue with whatever items were emitted.
+      - a SCOPE_STATUS line other than ok / refreshed -> say so in your summary.
+        While the scope is on, only PRs carrying the SEO label, Echelon-team PRs
+        where my review was requested, and team PRs that mention me are scanned;
+        that is expected, not an error.
 
       This job answers people. It posts thread replies, thread resolutions with a
       recorded basis, and at most one review dismissal per PR. It NEVER reviews
@@ -631,7 +661,108 @@ jobs:
     model: sonnet
     skip_permissions: true
     timeout: 1800
+    max_retries: 0 # hourly: the next run covers a failure; immediate retries only repeat an outage
     enabled: true
     tags:
       - hourly
       - pr-review
+
+  approve-prs:
+    name: Approve PRs — Converged Re-Reviews (opus)
+    schedule: 40 6-22 * * 1-5
+    directory: /Users/akorinek/Programming/ai-scheduler
+    prompt: |
+      ## FIRST, BEFORE ANYTHING ELSE: check the autopilot-daily lock
+
+      Run: `cat ~/.autopilot-daily.lock 2>/dev/null`
+
+      If that file exists AND its `startedAt` epoch-milliseconds value is less
+      than 120 minutes old, the autopilot-daily job is mid-run and holds the
+      machine. In that case print exactly:
+        "Deferred - autopilot-daily holds the lock"
+      and STOP immediately. Do not review any PRs, do not call any other tool.
+      You will run again next hour.
+
+      If the file is absent, unparseable, or older than 120 minutes, ignore it and
+      proceed normally with the review work below.
+
+      ## What this job is
+
+      The approving job. Only `converged` and `converged-static` candidates reach
+      it: pull requests where every blocking finding this reviewer raised was
+      resolved by this reviewer on code evidence. Every other reason belongs to
+      babysit-prs. This is the ONLY job that may post APPROVE on a converged PR,
+      and it runs on opus for that reason: sonnet may find, only opus may approve.
+      It runs at :40, ten minutes after the :30 conversation pass that creates
+      convergence.
+
+      STEP 1 - run the deterministic preflight gate. Your FIRST action is:
+
+        bash ~/.claude/skills/pr-review/scripts/batch-preflight.sh --role approve
+
+      It performs per-host auth checks, PR discovery, the full decision ladder,
+      budget selection (filtered to this job's reasons), and writes the batch
+      decision telemetry itself. Read its "PREFLIGHT_CANDIDATES:" line, and take the
+      candidates from the file named on its "PREFLIGHT_RESULT_FILE:" line
+      (jq '.candidates' FILE) - never from the "PREFLIGHT_RESULT_JSON:" line, which
+      the tool output truncates at ~2,000 chars:
+
+      - candidates EMPTY (PREFLIGHT_CANDIDATES: 0) -> print the script's decision
+        lines and summary as your run output and STOP. Do NOT read SKILL.md, do NOT
+        call any other tool. This is the expected outcome of most runs.
+      - candidates NON-EMPTY -> proceed to STEP 2 for exactly those PRs. Pass each
+        candidate's author_in_team to the gate exactly as the file gives it.
+      - exit code 2 -> a host was unreachable/unauthenticated. Say WHICH host
+        prominently in your summary (this must never look like "no PRs found"),
+        then still process any candidates that were emitted.
+      - a SCOPE_STATUS line other than ok / refreshed -> say so prominently in your
+        summary (the Echelon team roster could not be refreshed).
+
+      STEP 2 - review the preflight candidates by following
+      ~/.claude/skills/pr-review/SKILL.md EXACTLY, in scheduled/batch mode with
+      --auto behavior, starting at Step 0.5 (discovery and the decision ladder
+      already ran in preflight - do not re-derive or second-guess skip
+      decisions). A `converged` candidate is a delta re-review with specialists
+      dispatched as subagents (Step 4 hard gate) and the basis ledger pre-marking
+      addressed findings (Step 3); a `converged-static` candidate is Step 0.5V.
+      Either way the verdict comes from scripts/approve-gate.sh (Step 8): run it,
+      dispatch the architect (Role 6) when it asks, post exactly the event it
+      returns - `null` means post nothing and record the converged-shadow-skip
+      decision. The skill is the single source of truth for the trivial-delta
+      fast path, pagination discipline (--paginate on every reviews/comments
+      list call), the posting contract, the gate, and telemetry (schema v2
+      per-PR files with `job: "approve-prs"`, AND appending to the
+      {date}-batch.json runs[] decision log).
+
+      ## CRITICAL: host -> username mapping (identity only; all logic lives in the skill)
+      | Host | My username (self-review filter AND prior-review filter) |
+      |---|---|
+      | github.com | akorinek-grpn |
+      | github.groupondev.com | akorinek |
+
+      These are DIFFERENT accounts. For every `select(.user.login == ...)` filter,
+      pick the login from this table by the repo's host. Using the wrong one
+      silently returns zero hits and causes duplicate reviews on the same HEAD
+      (groupon/echelon#285, 2026-04-16).
+
+      ## Job-runner specifics (things the skill does not cover)
+      - If a github.groupondev.com call fails to connect, retry once after 15s.
+        Still failing: log "GHE unreachable - skipped <repo>" in the summary and
+        continue with the remaining repos; do NOT fail the whole run.
+      - Do not invoke unrelated skills (hello, session bootstrap, reporting,
+        etc.) - go straight to the review work.
+      - If a single PR review fails, log the error and continue to the next PR.
+      - If there are no candidates, report "No converged PRs to approve".
+      - ALWAYS print the per-PR decision lines and the batch summary table from
+        the skill's batch-mode section, even when everything is skipped.
+    model: opus
+    skip_permissions: true
+    # Same envelope as babysit-prs: a converged re-review dispatches five specialists
+    # plus the architect. Hourly schedule + no-overlap guard bound a long run.
+    timeout: 3600
+    max_retries: 0 # hourly: the next run covers a failure; immediate retries only repeat an outage
+    enabled: true
+    tags:
+      - hourly
+      - pr-review
+      - approve
