@@ -33,6 +33,7 @@ AI Scheduler is a local job orchestrator that runs Claude Code sessions and shel
 │    ├── meta.json    (job config, trigger)                │
 │    ├── status.json  (running → success|failed|timeout)   │
 │    ├── output.log   (parsed stdout)                      │
+│    ├── trace.jsonl  (tool-call trace, claude jobs)       │
 │    └── eval.json    (AI evaluation, severity, follow-up) │
 └─────────────────────────────────────────────────────────┘
                       │
@@ -51,12 +52,17 @@ src/
 │   ├── config.ts               # YAML loader with Zod validation
 │   ├── cron-engine.ts          # Job scheduling, overlap prevention, hot-reload
 │   ├── job-runner.ts           # Spawns child processes, parses stream-json output
+│   ├── run-trace.ts            # stream-json -> normalized trace.jsonl (Diagram data)
+│   ├── run-graph-reader.ts     # Picks trace.jsonl or output.log and builds the run graph
 │   ├── evaluator.ts            # Post-run AI evaluation via Claude Haiku
 │   └── pruner.ts               # FIFO run retention cleanup
 ├── shared/                     # Shared between daemon and web
 │   ├── types.ts                # TypeScript interfaces (JobConfig, RunStatus, etc.)
 │   ├── config-schema.ts        # Zod schema with type-dependent validation
-│   └── paths.ts                # Path helpers for data directory structure
+│   ├── paths.ts                # Path helpers for data directory structure
+│   ├── run-trace-types.ts      # trace.jsonl event types and capture limits
+│   ├── run-graph-types.ts      # RunGraph shape served to the Diagram view
+│   └── run-graph.ts            # Pure builders: trace / agent log / script log -> RunGraph
 └── web/                        # Next.js frontend
     ├── app/
     │   ├── layout.tsx           # Root layout with Sidebar + NotificationProvider
@@ -64,7 +70,7 @@ src/
     │   ├── timeline/page.tsx    # Visual run timeline
     │   ├── jobs/page.tsx        # Job listing with tag filters, enable/disable, trigger
     │   ├── runs/page.tsx        # Run history with job/status filters
-    │   ├── runs/[jobId]/[runId]/page.tsx  # Run detail with log viewer + AI eval
+    │   ├── runs/[jobId]/[runId]/page.tsx  # Run detail: AI eval, cost, Output | Diagram tabs
     │   ├── config/page.tsx      # Live YAML config editor
     │   └── api/                 # Proxy routes to daemon API
     │       ├── health/route.ts
@@ -78,11 +84,14 @@ src/
     │   ├── runs-table.tsx       # Tabular run display with eval column
     │   ├── job-card.tsx         # Job card with run dots, eval summary, toggle
     │   ├── log-viewer.tsx       # Streaming log display with auto-scroll
+    │   ├── run-diagram.tsx      # Diagram tab: fetches/polls the run graph
+    │   ├── run-diagram/         # Diagram rendering: summary, flow, categories, status marks
     │   ├── run-history-dots.tsx # Compact pass/fail dot indicators
     │   ├── timeline.tsx         # Timeline visualization
     │   └── notification-provider.tsx  # Push notification context
     └── lib/
         ├── api-client.ts        # Typed fetch wrapper for all API endpoints
+        ├── run-diagram.ts       # Pure Diagram helpers: grouping, windowing, labels, paths
         ├── format-cron.ts       # Human-readable cron translations
         └── utils.ts             # cn() helper for Tailwind class merging
 ```
@@ -105,8 +114,8 @@ src/
 2. Overlap check — skip if same job already running
 3. Job Runner creates run directory + meta.json + status.json (running)
 4. Spawns child process (claude or sh)
-5. Streams output to output.log (with stream-json parsing for claude jobs)
-6. On exit: writes final status.json (success/failed/timeout)
+5. Streams output to output.log (with stream-json parsing for claude jobs) and, for claude jobs, appends a normalized tool-call trace to trace.jsonl
+6. On exit: writes final status.json, stats.json, and a durable data/activity/<job-id>/<run-id>.json record
 7. Updates latest symlink
 8. Async: Evaluator reads output.log, calls Claude Haiku, writes eval.json
 9. Pruner verifies activity preservation before removing oldest runs beyond retain_runs limit
@@ -178,6 +187,7 @@ Config changes are picked up two ways:
 | `PATCH` | `/api/jobs/:jobId` | Enable/disable a job (modifies scheduler.yaml) |
 | `GET` | `/api/runs` | Run history with `?job=`, `?status=`, `?limit=` filters |
 | `GET` | `/api/runs/:jobId/:runId/log` | Incremental log read with `?offset=` for streaming |
+| `GET` | `/api/runs/:jobId/:runId/graph` | Run diagram graph: from `trace.jsonl`, or reconstructed from `output.log` for older and script runs |
 | `POST` | `/api/runs/:jobId/trigger` | Manually trigger a job |
 | `POST` | `/api/reload` | Re-read scheduler.yaml and update cron schedules |
 
@@ -197,6 +207,7 @@ data/
             ├── meta.json        # { jobId, runId, jobConfig, trigger, startedAt }
             ├── status.json      # { status, exitCode, startedAt, finishedAt }
             ├── output.log       # Parsed output (tool calls + results for claude, raw for scripts)
+            ├── trace.jsonl      # One JSON event per line: attempts, tool calls/results, subagents, outcome (claude jobs)
             └── eval.json        # { summary, severity, followUpNeeded, followUpReason, evaluatedAt }
 ```
 

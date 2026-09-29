@@ -34,7 +34,7 @@ npm run test:watch       # Vitest watch mode
 Entry point: `index.ts`. Starts Express on port 3501, loads `scheduler.yaml` via Zod validation, creates `CronEngine`.
 
 - **CronEngine** (`cron-engine.ts`) — manages `node-cron` tasks. `loadJobs()` is idempotent (adds/removes/restarts as needed). Tracks active jobs to prevent overlapping runs. Calls evaluator + pruner after each job completes.
-- **JobRunner** (`job-runner.ts`) — spawns either `Codex -p --verbose --output-format stream-json` (Codex mode) or a shell command (script mode). Parses stream-json events to extract text/tool output. Timeout: SIGTERM → 5s → SIGKILL.
+- **JobRunner** (`job-runner.ts`) — spawns either `Codex -p --verbose --output-format stream-json` (Codex mode) or a shell command (script mode). Parses stream-json events to extract text/tool output, and appends a normalized trace (`trace.jsonl`, via `run-trace.ts`) of tool calls, results, subagents and the final outcome. Timeout: SIGTERM → 5s → SIGKILL.
 - **Evaluator** (`evaluator.ts`) — non-blocking post-run scoring via Codex haiku. Writes `evaluation.json` with summary, severity (`ok`/`info`/`warning`/`critical`), and follow-up flags.
 - **Pruner** (`pruner.ts`) — FIFO cleanup when run count exceeds `retain_runs`.
 - **Config** (`config.ts`) — YAML → Zod validation. Returns `{success, data}` or `{success, error}`. Config errors are logged but don't crash; daemon keeps previous valid config.
@@ -43,13 +43,14 @@ Hot-reload: daemon watches `scheduler.yaml` with 500ms debounce, no restart need
 
 ### Web UI (`src/web/`)
 
-Next.js 16 + React 19 + Tailwind CSS v4 + shadcn components. API routes in `src/web/app/api/` proxy to the daemon on port 3501. Polling-based (5s dashboard, 3s logs). Log viewer uses offset-based incremental reads with auto-scroll.
+Next.js 16 + React 19 + Tailwind CSS v4 + shadcn components. API routes in `src/web/app/api/` proxy to the daemon on port 3501. Polling-based (5s dashboard, 3s logs). Log viewer uses offset-based incremental reads with auto-scroll. The run page switches between **Output** (the log) and **Diagram** (`?view=diagram`), which renders the graph from `GET /api/runs/:jobId/:runId/graph` and polls every 3s while the run is live.
 
 ### Shared (`src/shared/`)
 
 - `types.ts` — `RunStatus`, `JobConfig`, `SchedulerConfig`, `RunEvaluation`, etc.
 - `config-schema.ts` — Zod schemas. Key constraint: jobs must have `prompt` XOR `command`, not both.
-- `paths.ts` — helpers for `data/runs/<job-id>/<run-id>/` paths (meta.json, status.json, output.log, evaluation.json, `latest` symlink).
+- `paths.ts` — helpers for `data/runs/<job-id>/<run-id>/` paths (meta.json, status.json, output.log, trace.jsonl, evaluation.json, `latest` symlink).
+- `run-graph.ts` — pure builder that turns `trace.jsonl` (or, for runs recorded before tracing, `output.log`) into the `RunGraph` behind the Diagram view. Types: `run-trace-types.ts`, `run-graph-types.ts`.
 
 ### TypeScript Config
 
@@ -65,6 +66,7 @@ data/runs/<job-id>/<run-id>/
 ├── meta.json        # Job config snapshot + trigger type
 ├── status.json      # {status, exitCode, startedAt, completedAt}
 ├── output.log       # Parsed stdout
+├── trace.jsonl      # Normalized tool-call trace (claude jobs only; drives the Diagram view)
 └── evaluation.json  # LLM evaluation (optional)
 data/runs/<job-id>/latest -> <run-id>   # Symlink
 ```
@@ -102,5 +104,6 @@ jobs:
 - `GET /api/jobs` — job list with `isActive` flag
 - `GET /api/runs?job=&status=&limit=` — filtered run list
 - `GET /api/runs/:jobId/:runId/log?offset=` — incremental log content
+- `GET /api/runs/:jobId/:runId/graph` — run diagram data (from `trace.jsonl`; reconstructed from `output.log` for older and script runs)
 - `POST /api/runs/:jobId/trigger` — manual job trigger
 - `POST /api/reload` — force config reload

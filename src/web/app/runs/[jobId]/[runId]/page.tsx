@@ -1,17 +1,36 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LogViewer } from "@/components/log-viewer";
+import { RunDiagram } from "@/components/run-diagram";
 import { RunCostDetails } from "@/components/run-cost-details";
 import { ApiError, getRun, getRuns, type RunResponse } from "@/lib/api-client";
 
+type RunView = "output" | "diagram";
+
+function parseRunView(value: string | null): RunView {
+  return value === "diagram" ? "diagram" : "output";
+}
+
 export default function RunDetailPage(): React.ReactElement {
+  // useSearchParams (the ?view= of the Output | Diagram tabs) needs a Suspense boundary.
+  return <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">Loading run details…</p>}><RunDetailContent /></Suspense>;
+}
+
+function RunDetailContent(): React.ReactElement {
   const params = useParams<{ jobId: string; runId: string }>();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // Local state switches tabs instantly; ?view=diagram mirrors it so the view is linkable.
+  const [view, setView] = useState<RunView>(() => parseRunView(searchParams.get("view")));
+  // The diagram mounts on first open, then stays mounted so its expanded state survives tab switches.
+  const [diagramOpened, setDiagramOpened] = useState(view === "diagram");
   const [run, setRun] = useState<RunResponse | null>(null);
   const [siblingRuns, setSiblingRuns] = useState<RunResponse[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +105,17 @@ export default function RunDetailPage(): React.ReactElement {
   const currentIndex = siblingRuns.findIndex((r) => r.runId === params.runId);
   const prevRun = currentIndex >= 0 && currentIndex < siblingRuns.length - 1 ? siblingRuns[currentIndex + 1] : null;
   const nextRun = currentIndex > 0 ? siblingRuns[currentIndex - 1] : null;
+  const viewQuery = view === "diagram" ? "?view=diagram" : "";
+
+  const changeView = (next: RunView): void => {
+    setView(next);
+    if (next === "diagram") setDiagramOpened(true);
+    const query = new URLSearchParams(searchParams.toString());
+    if (next === "diagram") query.set("view", "diagram");
+    else query.delete("view");
+    const qs = query.toString();
+    router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -118,7 +148,7 @@ export default function RunDetailPage(): React.ReactElement {
             variant="outline"
             size="sm"
             disabled={!prevRun}
-            onClick={() => prevRun && router.push(`/runs/${params.jobId}/${prevRun.runId}`)}
+            onClick={() => prevRun && router.push(`/runs/${params.jobId}/${prevRun.runId}${viewQuery}`)}
           >
             {"\u2190"} Prev
           </Button>
@@ -126,7 +156,7 @@ export default function RunDetailPage(): React.ReactElement {
             variant="outline"
             size="sm"
             disabled={!nextRun}
-            onClick={() => nextRun && router.push(`/runs/${params.jobId}/${nextRun.runId}`)}
+            onClick={() => nextRun && router.push(`/runs/${params.jobId}/${nextRun.runId}${viewQuery}`)}
           >
             Next {"\u2192"}
           </Button>
@@ -177,7 +207,21 @@ export default function RunDetailPage(): React.ReactElement {
       )}
 
       {run && <RunCostDetails cost={run.cost} configuredModel={run.configuredModel} />}
-      {run && <LogViewer jobId={params.jobId} runId={params.runId} />}
+      {run && (
+        <Tabs value={view} onValueChange={(value) => changeView(parseRunView(typeof value === "string" ? value : null))} className="min-h-0 flex-1">
+          <TabsList variant="line" aria-label="Run view">
+            <TabsTrigger value="output">Output</TabsTrigger>
+            <TabsTrigger value="diagram">Diagram</TabsTrigger>
+          </TabsList>
+          {/* keepMounted: the log is fetched incrementally, so hiding it must not discard what was read. */}
+          <TabsContent value="output" keepMounted className="min-h-0">
+            <LogViewer jobId={params.jobId} runId={params.runId} active={view === "output"} />
+          </TabsContent>
+          <TabsContent value="diagram" keepMounted={diagramOpened} className="min-w-0">
+            <RunDiagram jobId={params.jobId} runId={params.runId} run={run} active={view === "diagram"} />
+          </TabsContent>
+        </Tabs>
+      )}
     </div>
   );
 }

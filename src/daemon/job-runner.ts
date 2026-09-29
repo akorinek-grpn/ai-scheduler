@@ -5,6 +5,7 @@ import { StringDecoder } from "node:string_decoder";
 import type { AttemptCost } from "@shared/cost-types";
 import { CostTracker, writeEvaluationCost, writeRunCost } from "./costs";
 import { preserveRunActivity } from "./stats";
+import { RunTraceWriter } from "./run-trace";
 import type {
   JobConfig,
   TriggerType,
@@ -20,6 +21,7 @@ import {
   getMetaPath,
   getStatsPath,
   getLatestSymlink,
+  getTracePath,
 } from "@shared/paths";
 
 interface RunJobOptions {
@@ -240,6 +242,12 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
   const isCustomCommand =
     isScript || options.command !== undefined || options.args !== undefined;
 
+  // Claude runs also record a compact event trace (trace.jsonl) for the run's
+  // Diagram view. Scripts and explicit command overrides have no stream-json.
+  const trace = isCustomCommand
+    ? null
+    : new RunTraceWriter(getTracePath(projectRoot, jobId, runId));
+
   const timeout = jobConfig.timeout ?? defaultTimeout;
 
   const toolsByName: Record<string, number> = {};
@@ -266,6 +274,7 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
     exitCode: number | null;
   }> =>
     new Promise((resolve) => {
+      trace?.startAttempt(attempt);
       const costTracker = new CostTracker(isCustomCommand ? "script" : "claude", attempt);
       const persistCost = (): void => {
         attemptCosts[attempt - 1] = costTracker.snapshot();
@@ -302,6 +311,7 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
         if (!trimmed) return;
         if (costTracker.consume(trimmed)) persistCost();
         if (isCustomCommand) return;
+        trace?.consume(trimmed);
         const text = extractTextFromStreamJson(trimmed);
         if (text) logStream.write(text);
         for (const name of countToolUseInStreamEvent(trimmed)) {
@@ -423,6 +433,7 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
   // Finalize the run record once, after all attempts. Wait for the log to
   // flush so callers reading output.log see the complete content.
   await new Promise<void>((res) => logStream.end(res));
+  await trace?.close();
 
   const finalStatus: RunStatusFile = {
     status: result.status,

@@ -53,6 +53,10 @@ export function getStatsPath(projectRoot: string, jobId: string, runId: string):
   return path.join(getRunDir(projectRoot, jobId, runId), "stats.json");
 }
 
+export function getTracePath(projectRoot: string, jobId: string, runId: string): string {
+  return path.join(getRunDir(projectRoot, jobId, runId), "trace.jsonl");
+}
+
 export function getLatestRunStartedAt(projectRoot: string, jobId: string): string | null {
   try {
     const runId = fs.readlinkSync(getLatestSymlink(projectRoot, jobId));

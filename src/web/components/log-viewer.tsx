@@ -6,9 +6,11 @@ import { getRunLog, type LogResponse } from "@/lib/api-client";
 interface LogViewerProps {
   jobId: string;
   runId: string;
+  /** False while the log's tab is hidden; once shown again it re-scrolls to the end if auto-scroll is on. */
+  active?: boolean;
 }
 
-export function LogViewer({ jobId, runId }: LogViewerProps): React.ReactElement {
+export function LogViewer({ jobId, runId, active = true }: LogViewerProps): React.ReactElement {
   const [lines, setLines] = useState<string>("");
   const [offset, setOffset] = useState(0);
   const [isDone, setIsDone] = useState(false);
@@ -46,11 +48,12 @@ export function LogViewer({ jobId, runId }: LogViewerProps): React.ReactElement 
     };
   }, [jobId, runId, offset, isDone]);
 
+  // A hidden log cannot scroll, so the scroll to the end runs again when it is shown.
   useEffect(() => {
-    if (isAutoScroll && bottomRef.current) {
+    if (active && isAutoScroll && bottomRef.current) {
       bottomRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [lines, isAutoScroll]);
+  }, [lines, isAutoScroll, active]);
 
   const handleScroll = () => {
     const container = containerRef.current;

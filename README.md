@@ -201,6 +201,7 @@ The dashboard at http://localhost:3500 shows:
 - **Jobs** — full job list with tag filtering and "Run now" buttons
 - **Run History** — filterable table of all runs across all jobs
 - **Log Viewer** — click any run to see its output (live-tailing for active runs)
+- **Run Diagram** — the run page's **Diagram** tab (`?view=diagram`) shows what the run did: each step, its tool calls with outcome and timing, errors with their messages, subagents nested under the call that spawned them, retries, and the final result. It updates live while the run is going. Claude runs recorded before tracing, and script runs, are reconstructed from `output.log` (script runs are split into sections on `=== title ===` lines); the view says when outcomes or nesting were not recorded. Restart the daemon after installing this code so new runs are traced and the `GET /api/runs/:jobId/:runId/graph` endpoint exists.
 - **Config** — read-only view of the current `scheduler.yaml`
 
 ### Manual Triggers
@@ -221,6 +222,7 @@ data/
 │       ├── <run-id>/
 │       │   ├── meta.json    # job config snapshot + trigger type
 │       │   ├── output.log   # claude's stdout/stderr
+│       │   ├── trace.jsonl  # tool-call trace for claude runs (drives the Diagram tab)
 │       │   └── status.json  # running/success/failed/timeout + exit code
 │       └── latest -> <run-id>
 └── daemon.log               # daemon process stdout

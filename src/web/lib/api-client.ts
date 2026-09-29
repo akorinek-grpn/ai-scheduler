@@ -1,4 +1,5 @@
 import type { CostStatsResponse, CostTotals, RunCostSummary } from "../../shared/cost-types";
+import type { RunGraph } from "../../shared/run-graph-types";
 
 const DAEMON_API_BASE = "/api";
 
@@ -107,6 +108,10 @@ export function getRunLog(
 
 export function getRun(jobId: string, runId: string, signal?: AbortSignal): Promise<RunResponse> {
   return fetchApi(`/runs/${encodeURIComponent(jobId)}/${encodeURIComponent(runId)}`, { cache: "no-store", signal });
+}
+
+export function getRunGraph(jobId: string, runId: string, signal?: AbortSignal): Promise<RunGraph> {
+  return fetchApi(`/runs/${encodeURIComponent(jobId)}/${encodeURIComponent(runId)}/graph`, { cache: "no-store", signal });
 }
 
 export function getCostStats(days: CostPeriod = 30, signal?: AbortSignal): Promise<CostStatsResponse> {

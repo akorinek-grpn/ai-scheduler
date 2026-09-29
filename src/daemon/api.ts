@@ -8,6 +8,7 @@ import { getLogPath, getStatusPath } from "@shared/paths";
 import { getActivityStats } from "./stats";
 import { emptyCostTotals, getCostStats, getRetainedJobCosts } from "./cost-stats";
 import { listRunSummaries, readRunSummary } from "./run-history";
+import { readRunGraph } from "./run-graph-reader";
 import type { RunStatusFile } from "@shared/types";
 
 export function createApp(engine: CronEngine, projectRoot: string, startedAt: string): express.Express {
@@ -94,6 +95,21 @@ export function createApp(engine: CronEngine, projectRoot: string, startedAt: st
         done: isDone,
       });
     });
+  });
+
+  app.get("/api/runs/:jobId/:runId/graph", (req, res) => {
+    const { jobId, runId } = req.params;
+    try {
+      const graph = readRunGraph(projectRoot, jobId, runId);
+      if (!graph) {
+        res.status(404).json({ error: "Run not found" });
+        return;
+      }
+      res.json(graph);
+    } catch (error) {
+      console.error(`[graph] Could not build the run graph for ${jobId}/${runId}:`, error);
+      res.status(500).json({ error: "Could not build the run graph" });
+    }
   });
 
   app.patch("/api/jobs/:jobId", (req, res) => {

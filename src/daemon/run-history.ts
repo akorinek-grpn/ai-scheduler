@@ -6,7 +6,7 @@ import { readRunCost } from "./costs";
 
 const cache = new Map<string, { signature: string; run: RunSummary }>();
 
-function safeSegment(segment: string): boolean {
+export function safeSegment(segment: string): boolean {
   return segment.length > 0 && segment !== "." && segment !== ".." && !/[\\/\0]/.test(segment);
 }
 
