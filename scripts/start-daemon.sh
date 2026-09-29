@@ -6,6 +6,17 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DATA_DIR="$PROJECT_ROOT/data"
 DAEMON_JSON="$DATA_DIR/daemon.json"
 
+# Started from inside Claude Code (the /ai-scheduler skill, an agent's shell), the daemon
+# would inherit that session's environment - CLAUDECODE, its session id and messaging
+# token, the secrets of ~/.claude/settings.json `env` - and pass it to every job it spawns
+# (2026-09-29). Relaunch from a clean login shell, which sets up PATH (node, bun, claude)
+# the way a terminal does.
+if [ -n "${CLAUDECODE:-}" ] && [ -z "${AI_SCHEDULER_CLEAN_START:-}" ]; then
+  exec env -i HOME="$HOME" USER="${USER:-$(id -un)}" LOGNAME="${LOGNAME:-$(id -un)}" \
+    SHELL="${SHELL:-/bin/zsh}" TERM="${TERM:-xterm-256color}" AI_SCHEDULER_CLEAN_START=1 \
+    "${SHELL:-/bin/zsh}" -lic 'exec "$0"' "$SCRIPT_DIR/start-daemon.sh" < /dev/null
+fi
+
 mkdir -p "$DATA_DIR"
 
 # Check if daemon is already running
