@@ -99,7 +99,7 @@ jobs:
     tags: [daily, health]
 ```
 
-Catch-ups (`catchup.ts`, wired to the engine in `catchup-wiring.ts`): a slot that did not run (sleep, daemon down, overlap, or a node-cron tick dropped for firing 1 s late) gets one catch-up run, found at startup, after a sleep gap, and by a 30 s missed-tick check. A job has at most one catch-up queued at a time, dropped if the job runs anyway (any trigger) before its turn. `same-day` skips a catch-up that would start on a later local date than its slot. Jobs get `SCHEDULER_TRIGGER` (`scheduled`/`manual`/`catchup`) and, for catch-ups, `SCHEDULER_CATCHUP_FOR` (the missed slot, ISO).
+Catch-ups (`catchup.ts`, wired to the engine in `catchup-wiring.ts`): a slot that did not run (sleep, daemon down, overlap, or a node-cron tick dropped for firing 1 s late) gets one catch-up run, found at startup, after a sleep gap, and by a 30 s missed-tick check. A job has at most one catch-up queued at a time, dropped if the job runs anyway (any trigger) before its turn. Before each catch-up the queue waits up to 10 min for the network (`network-gate.ts`: a TCP connect to `api.anthropic.com:443`), then runs it either way. `same-day` skips a catch-up that would start on a later local date than its slot. Jobs get `SCHEDULER_TRIGGER` (`scheduled`/`manual`/`catchup`) and, for catch-ups, `SCHEDULER_CATCHUP_FOR` (the missed slot, ISO).
 
 ## Daemon API Endpoints
 

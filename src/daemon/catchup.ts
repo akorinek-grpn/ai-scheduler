@@ -173,8 +173,17 @@ export interface CatchupQueueDeps {
    * still running; null if none. Without it, queued entries are never dropped as covered.
    */
   newestRunStartedAt?: (jobId: string) => string | null;
+  /**
+   * Awaited before each catch-up starts (network-gate.ts waitForNetwork); its result is
+   * ignored and a rejection is logged, so the catch-up runs either way. Without it, catch-ups
+   * start at once.
+   */
+  waitForNetwork?: () => Promise<unknown>;
   gapMs?: number;
 }
+
+/** A catch-up that starts within this long of a finished network wait needs no new wait. */
+const NETWORK_WAIT_FRESH_MS = 5_000;
 
 interface PendingEntry {
   jobId: string;
@@ -202,6 +211,8 @@ export class CatchupQueue {
   private inFlight: InFlightEntry | null = null;
   private gapMs: number;
   private gapTimer: NodeJS.Timeout | null = null;
+  private networkWait: Promise<void> | null = null;
+  private networkWaitEndedAt: number | null = null;
 
   constructor(private deps: CatchupQueueDeps) {
     this.gapMs = deps.gapMs ?? DEFAULT_GAP_MS;
@@ -292,6 +303,7 @@ export class CatchupQueue {
     this.dropCovered();
     if (this.inFlight) return;
     if (this.gapTimer) return;
+    if (this.networkWait) return;
     let next = this.pending.values().next().value;
     // Re-check the policy at start time: an entry can wait past midnight behind others.
     while (next && !this.policyAllowsNow(next.jobId, next.missedSlot)) {
@@ -304,6 +316,29 @@ export class CatchupQueue {
       // Leave queued; caller will poke us again after the active run finishes.
       return;
     }
+
+    // Wait for the network first, then pick again: while waiting, the head can be covered
+    // by a run, pass its same-day date, or have its job start.
+    const waitedRecently =
+      this.networkWaitEndedAt !== null &&
+      Date.now() - this.networkWaitEndedAt < NETWORK_WAIT_FRESH_MS;
+    if (this.deps.waitForNetwork && !waitedRecently) {
+      this.networkWait = this.deps
+        .waitForNetwork()
+        .then(
+          () => undefined,
+          (err: unknown) => {
+            console.error("[catchup] Network wait failed:", err);
+          },
+        )
+        .finally(() => {
+          this.networkWait = null;
+          this.networkWaitEndedAt = Date.now();
+          this.process();
+        });
+      return;
+    }
+    this.networkWaitEndedAt = null;
 
     this.pending.delete(next.jobId);
     this.inFlight = { jobId: next.jobId, startedAt: new Date() };

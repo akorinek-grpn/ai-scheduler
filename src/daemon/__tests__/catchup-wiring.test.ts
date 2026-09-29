@@ -135,6 +135,36 @@ describe("startCatchup (the daemon's catch-up wiring)", () => {
     ]);
   });
 
+  it("holds a startup catch-up until the network gate it is given opens", async () => {
+    writeRun("hourly", "2026-09-24T11:00:00.020Z", { finished: true }); // 12:00 missed
+    let open!: () => void;
+    const waitForNetwork = vi.fn(() => new Promise<void>((r) => (open = r)));
+    const engine = new CronEngine(tmpDir);
+    engine.loadJobs(makeConfig({ hourly: job("0 * * * *") }));
+    const wiring = startCatchup(engine, {
+      projectRoot: tmpDir,
+      waitForNetwork,
+    });
+    cleanup.push(() => {
+      wiring.stop();
+      engine.stopAll();
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(waitForNetwork).toHaveBeenCalledTimes(1);
+    expect(started).toEqual([]);
+
+    open();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(started).toEqual([
+      {
+        jobId: "hourly",
+        trigger: "catchup",
+        catchupFor: "2026-09-24T12:00:00.000Z",
+      },
+    ]);
+  });
+
   it("applies the job's catchup policy to a dropped tick (catchup: never)", async () => {
     writeRun("hourly", "2026-09-24T12:00:00.020Z", { finished: true });
     start(makeConfig({ hourly: job("0 * * * *", { catchup: "never" }) }));

@@ -7,6 +7,7 @@ import { CronEngine } from "./cron-engine";
 import { createApp } from "./api";
 import { getDaemonJsonPath, getRunsDir, getStatusPath } from "@shared/paths";
 import { startCatchup } from "./catchup-wiring";
+import { canConnect, NETWORK_PROBE, waitForNetwork } from "./network-gate";
 import { listenExclusive, PortInUseError } from "./single-instance";
 import { backfillActivityHistory, discardProvisionalRunStats } from "./stats";
 import type { DaemonHealth, RunStatusFile } from "@shared/types";
@@ -173,8 +174,15 @@ async function main(): Promise<void> {
   engine.loadJobs(configResult.data);
 
   // Catch-up queue plus missed-slot sweeps: at startup, after a clock gap (sleep) and
-  // every 30 s for ticks node-cron dropped (catchup-wiring.ts).
-  const catchup = startCatchup(engine, { projectRoot: PROJECT_ROOT });
+  // every 30 s for ticks node-cron dropped (catchup-wiring.ts). Each catch-up first waits
+  // (up to 10 min) for the network, which is often still down right after a wake.
+  const catchup = startCatchup(engine, {
+    projectRoot: PROJECT_ROOT,
+    waitForNetwork: () =>
+      waitForNetwork({
+        probe: () => canConnect(NETWORK_PROBE.host, NETWORK_PROBE.port),
+      }),
+  });
 
   console.log(
     `[daemon] Loaded ${Object.keys(configResult.data.jobs).length} jobs`,

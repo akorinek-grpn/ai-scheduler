@@ -595,6 +595,105 @@ describe("CatchupQueue: a catch-up the job has run past is dropped (2026-09-29)"
   });
 });
 
+describe("CatchupQueue: waits for the network before a catch-up", () => {
+  // Right after wake the network is often still down: on 2026-08-13 three catch-ups
+  // started within minutes of waking and died on ENOTFOUND / "Unable to connect".
+  const slot = new Date("2026-09-29T06:00:00Z");
+
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A network gate that stays closed until open() is called. */
+  const closedGate = () => {
+    let open!: () => void;
+    const gate = vi.fn(() => new Promise<void>((r) => (open = r)));
+    return { gate, open: () => open() };
+  };
+
+  it("starts a catch-up only once the gate resolves, probing once however often it is poked", async () => {
+    const { gate, open } = closedGate();
+    const runCatchup = vi.fn().mockResolvedValue(undefined);
+    const q = new CatchupQueue({
+      runCatchup,
+      isJobActive: () => false,
+      jobName: (id) => id,
+      gapMs: 0,
+      waitForNetwork: gate,
+    });
+    q.enqueue("job-a", slot);
+    q.process();
+    q.process(); // a sweep or a run ending pokes the queue while it waits
+    await new Promise((r) => setTimeout(r, 5));
+    expect(runCatchup).not.toHaveBeenCalled();
+    expect(gate).toHaveBeenCalledTimes(1);
+    expect(q.snapshot().queued.map((e) => e.jobId)).toEqual(["job-a"]);
+
+    open();
+    await vi.waitFor(() => expect(runCatchup).toHaveBeenCalledTimes(1));
+    expect(runCatchup).toHaveBeenCalledWith("job-a", slot);
+  });
+
+  it("waits for the network again before each later catch-up", async () => {
+    const gate = vi.fn().mockResolvedValue(true);
+    const runCatchup = vi.fn().mockResolvedValue(undefined);
+    const q = new CatchupQueue({
+      runCatchup,
+      isJobActive: () => false,
+      jobName: (id) => id,
+      gapMs: 0,
+      waitForNetwork: gate,
+    });
+    q.enqueue("job-a", slot);
+    q.enqueue("job-b", slot);
+    q.process();
+    await vi.waitFor(() => expect(runCatchup).toHaveBeenCalledTimes(2));
+    expect(gate).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops a catch-up the job covered while the queue waited for the network", async () => {
+    const { gate, open } = closedGate();
+    let newest: string | null = null;
+    const runCatchup = vi.fn().mockResolvedValue(undefined);
+    const q = new CatchupQueue({
+      runCatchup,
+      isJobActive: () => false,
+      jobName: (id) => id,
+      gapMs: 0,
+      newestRunStartedAt: () => newest,
+      waitForNetwork: gate,
+    });
+    q.enqueue("babysit-prs", slot);
+    q.process();
+
+    newest = "2026-09-29T07:00:00.015Z"; // its next scheduled tick ran meanwhile
+    open();
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(runCatchup).not.toHaveBeenCalled();
+    expect(q.snapshot().queued).toEqual([]);
+  });
+
+  it("still runs the catch-up when the gate itself fails", async () => {
+    const gate = vi.fn().mockRejectedValue(new Error("probe crashed"));
+    const runCatchup = vi.fn().mockResolvedValue(undefined);
+    const q = new CatchupQueue({
+      runCatchup,
+      isJobActive: () => false,
+      jobName: (id) => id,
+      gapMs: 0,
+      waitForNetwork: gate,
+    });
+    q.enqueue("job-a", slot);
+    q.process();
+    await vi.waitFor(() => expect(runCatchup).toHaveBeenCalledTimes(1));
+  });
+});
+
 describe("sweepMissedRuns", () => {
   const queue = () =>
     new CatchupQueue({

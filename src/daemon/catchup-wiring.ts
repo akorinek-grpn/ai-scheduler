@@ -9,6 +9,8 @@ export interface CatchupWiringOptions {
   projectRoot: string;
   /** Missed-tick check interval. Default MISSED_TICK_POLL_MS. */
   missedTickPollMs?: number;
+  /** Awaited before each catch-up (the queue's waitForNetwork). index.ts passes the network gate. */
+  waitForNetwork?: () => Promise<unknown>;
 }
 
 export interface CatchupWiring {
@@ -38,6 +40,7 @@ export function startCatchup(
     // The sweeps' source too: a queued catch-up is dropped once the job has run past its slot.
     newestRunStartedAt: (jobId) =>
       getNewestRunStartedAt(opts.projectRoot, jobId),
+    waitForNetwork: opts.waitForNetwork,
   });
   engine.setCatchupQueue(queue);
 
