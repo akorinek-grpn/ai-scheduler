@@ -1,5 +1,6 @@
 "use client";
 
+import { runHref } from "@/lib/api-client";
 import Link from "next/link";
 import type { RunResponse } from "@/lib/api-client";
 
@@ -45,7 +46,7 @@ export function RunHistoryDots({ runs, count = 3 }: RunHistoryDotsProps): React.
       {displayRuns.map((run) => (
         <Link
           key={`${run.jobId}-${run.runId}`}
-          href={`/runs/${run.jobId}/${run.runId}`}
+          href={runHref(run)}
           title={`${run.status} \u2014 ${formatTime(run.startedAt)}`}
           className={`flex h-4 w-4 items-center justify-center rounded border text-[8px] text-white transition-colors ${
             statusColors[run.status] ?? "bg-muted-foreground border-muted-foreground/50"

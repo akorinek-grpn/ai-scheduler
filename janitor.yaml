@@ -1,0 +1,36 @@
+# Settings for `npm run janitor` (scripts/janitor.ts; rules in src/janitor/processes.ts).
+# Every key is optional; what is left out keeps its default.
+#
+# The janitor only ever stops a dev server or an MCP server whose session is gone (the tree hangs
+# off launchd with no terminal, IDE or Claude session in it), and only when it is older than
+# min_age_minutes, was already seen by an earlier run, and used almost no CPU since. It never
+# touches the scheduler daemon, the jobs it is running, this project's own dev server, or anything
+# launchd runs as a service.
+
+min_age_minutes: 120 # a detached tree younger than this is left alone
+max_cpu_seconds_per_hour: 120 # more CPU than this between two runs means "still in use"
+min_observation_gap_minutes: 30 # two runs closer together than this cannot show idleness
+
+kill:
+  dev_servers: true # next dev, vite, nx dev, `npm|bun|pnpm|yarn run dev|serve|preview`, ...
+  mcp_servers: true # MCP servers left behind by a Claude session or job that ended
+
+# Long-running things started in the background on purpose. A tree matching any entry is reported
+# as PROTECTED and never stopped. Pilot's worker (.pilot/scripts/worker-service.cjs) is built in.
+protect:
+  commands: [] # regular expressions matched against the full command line of every process in the tree
+  ports:
+    - 3847 # personalized-helper: the 5/15 review and /me pages the daily jobs point at
+  directories: [] # a tree running from (or in) one of these is protected; ~ is expanded
+
+disk:
+  uv_cache_prune: true # uv cache prune
+  pnpm_store_prune: true # pnpm store prune
+  npm_cache_verify: true # npm cache verify (garbage-collects the cache)
+  docker_prune: true # dangling images + build cache older than 7 days; skipped when Docker is not running
+  # Whole directories nothing touched for max_age_days are removed. depth is how many levels below
+  # path the entries live: pr-review keeps <host>/<owner>/<repo>/pr-N and re-creates one on demand.
+  expire:
+    - path: ~/.claude/cache/pr-review-worktrees
+      depth: 4
+      max_age_days: 7

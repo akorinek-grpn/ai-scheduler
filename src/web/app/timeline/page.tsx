@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Timeline } from "@/components/timeline";
 import { getJobs, getRuns, type JobResponse, type RunResponse } from "@/lib/api-client";
+import { useHostView } from "@/components/host-view";
 
 function getWeekStart(date: Date): Date {
   const d = new Date(date);
@@ -17,18 +18,22 @@ function getWeekStart(date: Date): Date {
 }
 
 export default function TimelinePage(): React.ReactElement {
+  const { hostParam, multi } = useHostView();
   const [jobs, setJobs] = useState<JobResponse[]>([]);
   const [runs, setRuns] = useState<RunResponse[]>([]);
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()));
 
   const fetchAll = useCallback(async () => {
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 7);
     const [j, r] = await Promise.all([
-      getJobs().catch(() => []),
-      getRuns({ limit: 500 }).catch(() => []),
+      getJobs(hostParam).catch(() => []),
+      // The week's runs from every Mac: a job that moved keeps the history the other Mac ran.
+      getRuns({ host: multi ? "all" : undefined, since: weekStart, until: weekEnd, limit: 5000 }).catch(() => []),
     ]);
     setJobs(j);
     setRuns(r);
-  }, []);
+  }, [hostParam, multi, weekStart]);
 
   useEffect(() => {
     fetchAll();

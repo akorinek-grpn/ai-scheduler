@@ -174,8 +174,11 @@ export function readRunGraph(
         : null,
   };
 
+  // A trace is always an agent's: a claude job's own, or the inner Claude session a script run
+  // started (inner-sessions.ts), so it is drawn as an agent run whatever the job type.
   const trace = readIfExists(getTracePath(projectRoot, jobId, runId));
-  if (trace !== null) return buildGraphFromTrace(parseTraceLines(trace), ctx);
+  if (trace !== null)
+    return buildGraphFromTrace(parseTraceLines(trace), { ...ctx, kind: "agent" });
 
   const log = readLogHead(getLogPath(projectRoot, jobId, runId));
   const expectedAttempts = recordedAttempts(runDir);

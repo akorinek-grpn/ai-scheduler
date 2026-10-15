@@ -1,5 +1,6 @@
 import React, { useId } from "react";
 import Link from "next/link";
+import { runHref } from "../lib/api-client";
 import type {
   CatchupQueueEntry,
   CatchupQueueInFlight,
@@ -93,7 +94,7 @@ function NowBlock({
             </span>
             {liveRun ? (
               <Link
-                href={`/runs/${liveRun.jobId}/${liveRun.runId}`}
+                href={runHref(liveRun)}
                 className="inline-flex min-h-[24px] items-center text-[13px] hover:underline"
               >
                 {inFlight.jobName}
@@ -235,7 +236,7 @@ export function CatchupRunsPanel({
                     </td>
                     <td className="w-full max-w-0 px-1.5 py-0.5">
                       <Link
-                        href={`/runs/${run.jobId}/${run.runId}`}
+                        href={runHref(run)}
                         className="block truncate text-[13px] leading-[24px] hover:underline"
                         title={run.jobName}
                       >

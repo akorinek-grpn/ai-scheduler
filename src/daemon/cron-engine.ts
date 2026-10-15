@@ -102,6 +102,8 @@ export class CronEngine {
         trigger: "scheduled",
         defaultTimeout: config.defaults.timeout,
         maxRetries: jobConfig.max_retries ?? config.defaults.max_retries,
+        priority: jobConfig.priority ?? config.defaults.priority,
+        host: config.host?.name,
       });
       if (result.status === "success") {
         console.log(`[cron] Completed ${jobId}: success`);
@@ -118,6 +120,10 @@ export class CronEngine {
         jobConfig.name,
         result.status,
         result.exitCode,
+        {
+          decisionMode: this.currentConfig?.evaluator?.decision_model ?? "off",
+          logRetainMonths: this.currentConfig?.evaluator?.log_retain_months,
+        },
       ).catch((err) =>
         console.error(`[eval] ${jobId}: evaluation failed:`, err),
       );
@@ -157,6 +163,8 @@ export class CronEngine {
         defaultTimeout: this.currentConfig.defaults.timeout,
         maxRetries:
           jobConfig.max_retries ?? this.currentConfig.defaults.max_retries,
+        priority: jobConfig.priority ?? this.currentConfig.defaults.priority,
+        host: this.currentConfig.host?.name,
       });
       evaluateRun(
         this.projectRoot,
@@ -165,6 +173,10 @@ export class CronEngine {
         jobConfig.name,
         result.status,
         result.exitCode,
+        {
+          decisionMode: this.currentConfig?.evaluator?.decision_model ?? "off",
+          logRetainMonths: this.currentConfig?.evaluator?.log_retain_months,
+        },
       ).catch((err) =>
         console.error(`[eval] ${jobId}: evaluation failed:`, err),
       );
@@ -211,6 +223,8 @@ export class CronEngine {
         defaultTimeout: this.currentConfig.defaults.timeout,
         maxRetries:
           jobConfig.max_retries ?? this.currentConfig.defaults.max_retries,
+        priority: jobConfig.priority ?? this.currentConfig.defaults.priority,
+        host: this.currentConfig.host?.name,
       });
       evaluateRun(
         this.projectRoot,
@@ -219,6 +233,10 @@ export class CronEngine {
         jobConfig.name,
         result.status,
         result.exitCode,
+        {
+          decisionMode: this.currentConfig?.evaluator?.decision_model ?? "off",
+          logRetainMonths: this.currentConfig?.evaluator?.log_retain_months,
+        },
       ).catch((err) =>
         console.error(`[eval] ${jobId}: evaluation failed:`, err),
       );

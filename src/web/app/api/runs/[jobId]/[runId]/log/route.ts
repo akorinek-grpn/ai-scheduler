@@ -19,11 +19,13 @@ export async function GET(
   { params }: { params: Promise<{ jobId: string; runId: string }> }
 ): Promise<NextResponse> {
   const { jobId, runId } = await params;
-  const offset = request.nextUrl.searchParams.get("offset") || "0";
+  // offset, plus host (a run read from another Mac's mirrored data).
+  const query = new URLSearchParams(request.nextUrl.searchParams);
+  if (!query.has("offset")) query.set("offset", "0");
   const url = getDaemonUrl();
   if (!url) return NextResponse.json({ error: "Daemon not available" }, { status: 503 });
   try {
-    const res = await fetch(`${url}/api/runs/${jobId}/${runId}/log?offset=${offset}`);
+    const res = await fetch(`${url}/api/runs/${jobId}/${runId}/log?${query.toString()}`);
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });
   } catch {

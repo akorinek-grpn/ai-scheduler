@@ -4,7 +4,6 @@ import { useEffect, useState, useMemo } from "react";
 import {
   ComposedChart,
   Bar,
-  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -12,6 +11,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { getActivityStats, type ActivityStatsResponse } from "@/lib/api-client";
+import { useHostView } from "@/components/host-view";
 
 const CHART_HEIGHT = 160;
 const TOP_TOOL_COUNT = 5;
@@ -45,6 +45,10 @@ export function LifetimeActivity(): React.ReactElement {
     return () => clearInterval(interval);
   }, []);
 
+  const { colorOf } = useHostView();
+  // Several hosts: one stacked segment per host, in scheduler.yaml order.
+  const hosts = data?.hosts && data.hosts.length > 1 ? data.hosts : null;
+
   const { sessions, toolCalls, avg, chartData, tools } = useMemo(() => {
     if (!data) {
       return { sessions: 0, toolCalls: 0, avg: 0, chartData: [], tools: [] as Array<{ name: string; count: number; pct: number }> };
@@ -52,13 +56,14 @@ export function LifetimeActivity(): React.ReactElement {
     const sessions = data.lifetime.sessions;
     const toolCalls = data.lifetime.toolCalls;
     const avg = sessions === 0 ? 0 : Math.round(toolCalls / sessions);
-    const chartData = data.daily.map((d) => ({
+    const chartData = data.daily.map((d, day) => ({
       label: formatDate(d.date),
       sessions: d.sessions,
       toolCalls: d.toolCalls,
+      ...Object.fromEntries((hosts ?? []).map((h, i) => [`h${i}`, h.daily[day]?.sessions ?? 0])),
     }));
     return { sessions, toolCalls, avg, chartData, tools: topTools(data.lifetime.toolsByName, toolCalls) };
-  }, [data]);
+  }, [data, hosts]);
 
   return (
     <section className="rounded border border-border p-4 space-y-4" aria-label="Lifetime activity">
@@ -85,7 +90,22 @@ export function LifetimeActivity(): React.ReactElement {
         </div>
       </div>
 
-      {/* Time-series */}
+      {/* Per-host legend with each host's totals (the label carries the identity, not the color) */}
+      {hosts && (
+        <ul className="flex flex-wrap gap-x-6 gap-y-1 text-[12px]" aria-label="AI sessions by Mac">
+          {hosts.map((h) => (
+            <li key={h.name} className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: colorOf(h.name) }} aria-hidden="true" />
+              <span className="font-medium">{h.role}</span>
+              <span className="text-muted-foreground tabular-nums">
+                {formatNumber(h.lifetime.sessions)} sessions · {formatNumber(h.lifetime.toolCalls)} tool calls
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Daily AI sessions, one axis; tool calls per day are in the tooltip */}
       {chartData.length > 0 && (
         <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
           <ComposedChart data={chartData} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
@@ -98,23 +118,14 @@ export function LifetimeActivity(): React.ReactElement {
               interval={Math.floor(chartData.length / 8)}
             />
             <YAxis
-              yAxisId="sessions"
               tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
               axisLine={false}
               tickLine={false}
               width={24}
               allowDecimals={false}
             />
-            <YAxis
-              yAxisId="tools"
-              orientation="right"
-              tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
-              axisLine={false}
-              tickLine={false}
-              width={32}
-              allowDecimals={false}
-            />
             <Tooltip
+              itemStyle={{ color: "var(--color-foreground)" }}
               contentStyle={{
                 backgroundColor: "var(--color-card)",
                 border: "1px solid var(--color-border)",
@@ -123,16 +134,31 @@ export function LifetimeActivity(): React.ReactElement {
                 color: "var(--color-foreground)",
               }}
               cursor={{ fill: "var(--color-secondary)", opacity: 0.4 }}
+              formatter={(value, name) => {
+                const index = typeof name === "string" && /^h\d+$/.test(name) ? Number(name.slice(1)) : -1;
+                return [value, index >= 0 && hosts ? `${hosts[index].role} sessions` : "AI sessions"];
+              }}
+              labelFormatter={(label, payload) => {
+                const row = payload?.[0]?.payload as { toolCalls?: number } | undefined;
+                return row?.toolCalls !== undefined ? `${label} · ${formatNumber(row.toolCalls)} tool calls` : String(label);
+              }}
             />
-            <Bar yAxisId="sessions" dataKey="sessions" fill="oklch(0.70 0.15 250)" radius={[2, 2, 0, 0]} />
-            <Line
-              yAxisId="tools"
-              type="monotone"
-              dataKey="toolCalls"
-              stroke="oklch(0.70 0.18 150)"
-              strokeWidth={2}
-              dot={false}
-            />
+            {hosts ? (
+              hosts.map((h, i) => (
+                <Bar
+                  key={h.name}
+                  dataKey={`h${i}`}
+                  stackId="hosts"
+                  fill={colorOf(h.name)}
+                  stroke="var(--color-card)"
+                  strokeWidth={2}
+                  radius={i === hosts.length - 1 ? [2, 2, 0, 0] : [0, 0, 0, 0]}
+                  isAnimationActive={false}
+                />
+              ))
+            ) : (
+              <Bar dataKey="sessions" fill="oklch(0.70 0.15 250)" radius={[2, 2, 0, 0]} />
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       )}

@@ -6,8 +6,11 @@ import type { AttemptCost } from "@shared/cost-types";
 import { CostTracker, writeEvaluationCost, writeRunCost } from "./costs";
 import { preserveRunActivity } from "./stats";
 import { RunTraceWriter } from "./run-trace";
+import { extractTextFromStreamJson } from "./stream-text";
+import { ingestInnerSessions } from "./inner-sessions";
 import type {
   JobConfig,
+  JobPriority,
   TriggerType,
   RunMeta,
   RunStatus,
@@ -37,6 +40,40 @@ interface RunJobOptions {
   sigkillGraceMs?: number;
   /** Extra attempts after the first if the run does not succeed. Default 0 (no retries). */
   maxRetries?: number;
+  /**
+   * CPU/IO priority of the job's process tree. The cron engine passes the resolved
+   * scheduler.yaml value (job `priority`, else `defaults.priority`, "background" by default);
+   * a direct caller that passes nothing runs at normal priority.
+   */
+  priority?: JobPriority;
+  /** This host's name (config.host), recorded in meta.json so mirrored history keeps its origin. */
+  host?: string;
+}
+
+const TASKPOLICY = "/usr/sbin/taskpolicy";
+
+/**
+ * Wrap a command so the job yields to interactive work. On macOS `taskpolicy -c background`
+ * execs the program in place (same pid, so runJob's process-group signalling still reaches
+ * the whole tree); a background-clamped tree gets full CPU on an idle machine and only steps
+ * aside under contention. Elsewhere `nice -n 19` lowers CPU priority only. Windows has no
+ * equivalent here and runs the command unchanged.
+ */
+export function withPriority(
+  command: string,
+  args: string[],
+  priority: JobPriority,
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
+  if (priority !== "background" || platform === "win32")
+    return { command, args };
+  if (platform === "darwin" && fs.existsSync(TASKPOLICY)) {
+    return {
+      command: TASKPOLICY,
+      args: ["-c", "background", command, ...args],
+    };
+  }
+  return { command: "nice", args: ["-n", "19", command, ...args] };
 }
 
 interface RunResult {
@@ -50,38 +87,6 @@ function generateRunId(): string {
   const timestamp = now.toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const hash = crypto.randomBytes(3).toString("hex");
   return `${timestamp}-${hash}`;
-}
-
-function formatToolInput(name: string, input: Record<string, unknown>): string {
-  switch (name) {
-    case "Bash":
-      return input.command ? `$ ${input.command}` : "";
-    case "Read":
-      return input.file_path ? `Reading ${input.file_path}` : "";
-    case "Write":
-      return input.file_path ? `Writing ${input.file_path}` : "";
-    case "Edit":
-      return input.file_path ? `Editing ${input.file_path}` : "";
-    case "Glob":
-      return input.pattern ? `Glob: ${input.pattern}` : "";
-    case "Grep":
-      return input.pattern ? `Grep: ${input.pattern}` : "";
-    case "Skill":
-      return input.skill ? `Skill: ${input.skill}` : "";
-    case "Agent":
-      return input.description ? `Agent: ${input.description}` : "";
-    default:
-      return "";
-  }
-}
-
-function truncate(text: string, maxLines: number): string {
-  const lines = text.split("\n");
-  if (lines.length <= maxLines) return text;
-  return (
-    lines.slice(0, maxLines).join("\n") +
-    `\n... (${lines.length - maxLines} more lines)`
-  );
 }
 
 export function countToolUseInStreamEvent(line: string): string[] {
@@ -104,72 +109,6 @@ export function countToolUseInStreamEvent(line: string): string[] {
   }
 }
 
-function extractTextFromStreamJson(line: string): string | null {
-  try {
-    const event = JSON.parse(line);
-
-    // Assistant message — extract text AND tool calls
-    if (event.type === "assistant" && event.message?.content) {
-      const parts: string[] = [];
-
-      for (const block of event.message.content) {
-        if (block.type === "text" && block.text?.trim()) {
-          parts.push(block.text);
-        }
-        if (block.type === "tool_use") {
-          const detail = formatToolInput(block.name, block.input ?? {});
-          if (detail) {
-            parts.push(`\n> [${block.name}] ${detail}\n`);
-          } else {
-            parts.push(`\n> [${block.name}]\n`);
-          }
-        }
-      }
-
-      if (parts.length > 0) return parts.join("");
-    }
-
-    // Content block delta (streaming partial text)
-    if (event.type === "content_block_delta" && event.delta?.text) {
-      return event.delta.text;
-    }
-
-    // Tool result — nested inside "user" message events
-    if (event.type === "user" && event.message?.content) {
-      const contents = Array.isArray(event.message.content)
-        ? event.message.content
-        : [event.message.content];
-
-      const parts: string[] = [];
-      for (const block of contents) {
-        if (block.type === "tool_result") {
-          let text = "";
-          if (typeof block.content === "string") {
-            text = block.content;
-          } else if (Array.isArray(block.content)) {
-            text = block.content
-              .filter((b: { type: string }) => b.type === "text")
-              .map((b: { text: string }) => b.text)
-              .join("");
-          }
-          if (text.trim()) {
-            parts.push(truncate(text, 50));
-          }
-        }
-      }
-      if (parts.length > 0) return parts.join("\n") + "\n";
-    }
-
-    // Final result
-    if (event.type === "result" && event.result?.trim()) {
-      return event.result;
-    }
-  } catch {
-    // Not valid JSON — could be partial line, ignore
-  }
-  return null;
-}
-
 export async function runJob(options: RunJobOptions): Promise<RunResult> {
   const {
     jobId,
@@ -180,6 +119,8 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
     catchupFor,
     sigkillGraceMs = 5000,
     maxRetries = 0,
+    priority = "normal",
+    host,
   } = options;
   const runId = generateRunId();
   const runDir = getRunDir(projectRoot, jobId, runId);
@@ -193,6 +134,7 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
     trigger,
     startedAt: new Date().toISOString(),
     ...(catchupFor !== undefined ? { catchupFor } : {}),
+    ...(host ? { host } : {}),
   };
   fs.writeFileSync(
     getMetaPath(projectRoot, jobId, runId),
@@ -242,11 +184,29 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
   const isCustomCommand =
     isScript || options.command !== undefined || options.args !== undefined;
 
+  const spawnTarget = withPriority(command, args, priority);
+
   // Claude runs also record a compact event trace (trace.jsonl) for the run's
   // Diagram view. Scripts and explicit command overrides have no stream-json.
   const trace = isCustomCommand
     ? null
     : new RunTraceWriter(getTracePath(projectRoot, jobId, runId));
+
+  // A script that starts its own Claude session (autopilot's b2c-toolkit runs) gets that
+  // session's text and trace copied into the run, every 15 s while it runs and once at the end
+  // (inner-sessions.ts). Best effort: a failure here never touches the run's outcome.
+  const ingestSessions = (final: boolean): void => {
+    if (!isScript) return;
+    try {
+      ingestInnerSessions(getRunDir(projectRoot, jobId, runId), { final });
+    } catch (err) {
+      console.error(
+        `[sessions] ${jobId}/${runId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+  const sessionTimer = isScript ? setInterval(() => ingestSessions(false), 15_000) : null;
+  sessionTimer?.unref();
 
   const timeout = jobConfig.timeout ?? defaultTimeout;
 
@@ -256,7 +216,10 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
   // SCHEDULER_TRIGGER and, for a catch-up, SCHEDULER_CATCHUP_FOR (the missed slot, ISO)
   // let a job work on the slot's date instead of "today": a catch-up can start the next
   // morning. Never pass on a SCHEDULER_CATCHUP_FOR inherited by the daemon itself.
-  const jobEnv: NodeJS.ProcessEnv = { ...process.env, SCHEDULER_TRIGGER: trigger };
+  const jobEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    SCHEDULER_TRIGGER: trigger,
+  };
   delete jobEnv.SCHEDULER_CATCHUP_FOR;
   if (catchupFor !== undefined) jobEnv.SCHEDULER_CATCHUP_FOR = catchupFor;
 
@@ -265,7 +228,12 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
   writeEvaluationCost(projectRoot, jobId, runId, "pending");
 
   const writeStats = (): void => {
-    const stats: RunStats = { toolCalls, toolsByName, isAiSession, finalized: true };
+    const stats: RunStats = {
+      toolCalls,
+      toolsByName,
+      isAiSession,
+      finalized: true,
+    };
     fs.writeFileSync(
       getStatsPath(projectRoot, jobId, runId),
       JSON.stringify(stats, null, 2),
@@ -276,13 +244,18 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
   // but does NOT finalize the run record, so runJob can retry before committing
   // the final status + latest symlink. The shared logStream stays open across
   // attempts (piped with `end: false`) and is closed once during finalization.
-  const runAttempt = (attempt: number): Promise<{
+  const runAttempt = (
+    attempt: number,
+  ): Promise<{
     status: RunStatus;
     exitCode: number | null;
   }> =>
     new Promise((resolve) => {
       trace?.startAttempt(attempt);
-      const costTracker = new CostTracker(isCustomCommand ? "script" : "claude", attempt);
+      const costTracker = new CostTracker(
+        isCustomCommand ? "script" : "claude",
+        attempt,
+      );
       const persistCost = (): void => {
         attemptCosts[attempt - 1] = costTracker.snapshot();
         writeRunCost(projectRoot, jobId, runId, attemptCosts);
@@ -294,7 +267,7 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
       // open (so `close` never fires) and pin the run at "running" forever -
       // which makes the daemon skip every later run of that job as "still
       // active" until it is restarted.
-      const child = spawn(command, args, {
+      const child = spawn(spawnTarget.command, spawnTarget.args, {
         cwd: jobConfig.directory,
         env: {
           ...jobEnv,
@@ -441,6 +414,8 @@ export async function runJob(options: RunJobOptions): Promise<RunResult> {
   // flush so callers reading output.log see the complete content.
   await new Promise<void>((res) => logStream.end(res));
   await trace?.close();
+  if (sessionTimer) clearInterval(sessionTimer);
+  ingestSessions(true);
 
   const finalStatus: RunStatusFile = {
     status: result.status,

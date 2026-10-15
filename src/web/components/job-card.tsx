@@ -8,6 +8,7 @@ import { triggerJob, setJobEnabled } from "@/lib/api-client";
 import { formatCronHuman } from "@/lib/format-cron";
 import { useState } from "react";
 import { JobCost } from "./cost-value";
+import { HostBadge, PlacementBadge, useHostView } from "./host-view";
 
 interface JobCardProps {
   job: JobResponse;
@@ -30,6 +31,7 @@ const severityBg: Record<string, string> = {
 };
 
 export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.ReactElement {
+  const { view } = useHostView();
   const [isTriggering, setIsTriggering] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
 
@@ -84,6 +86,11 @@ export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.Rea
       <div className="flex items-center gap-2 mb-1">
         <div className={`h-1.5 w-1.5 rounded-full shrink-0 ${statusColor}`} />
         <span className="text-[13px] font-medium truncate">{job.name}</span>
+        {view === "all" && job.host ? (
+          <HostBadge name={job.host} compact />
+        ) : (
+          <PlacementBadge runsOn={job.runs_on} />
+        )}
         {successRate !== null && (
           <span className={`text-[11px] font-mono tabular-nums ml-auto shrink-0 ${
             successRate >= 80 ? "text-green-500" : successRate >= 50 ? "text-amber-500" : "text-red-500"
@@ -118,26 +125,32 @@ export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.Rea
         {recentRuns.length > 0 && (
           <RunHistoryDots runs={recentRuns} count={3} />
         )}
-        <div className="ml-auto flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-[11px] h-6 px-1.5 text-muted-foreground"
-            onClick={handleToggle}
-            disabled={isToggling || job.isActive}
-          >
-            {isToggling ? "..." : job.enabled ? "Off" : "On"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-[11px] h-6 px-2"
-            onClick={handleTrigger}
-            disabled={isTriggering || job.isActive || !job.enabled}
-          >
-            {isTriggering ? "..." : "Run"}
-          </Button>
-        </div>
+        {job.readOnly ? (
+          <span className="ml-auto text-[10px] text-muted-foreground">
+            {job.isActive ? "running there" : "read-only"}
+          </span>
+        ) : (
+          <div className="ml-auto flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-[11px] h-6 px-1.5 text-muted-foreground"
+              onClick={handleToggle}
+              disabled={isToggling || job.isActive}
+            >
+              {isToggling ? "..." : job.enabled ? "Off" : "On"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-[11px] h-6 px-2"
+              onClick={handleTrigger}
+              disabled={isTriggering || job.isActive || !job.enabled}
+            >
+              {isTriggering ? "..." : "Run"}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

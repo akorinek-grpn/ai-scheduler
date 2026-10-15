@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CostTracker, readRunCost, writeRunCost, writeEvaluationCost } from "../costs";
+import { CostTracker, readRunCost, writeRunCost, writeEvaluationCost, writeRunDecision } from "../costs";
 import { getRunDir } from "@shared/paths";
 
 const result = (cost: unknown = 0.12): string => JSON.stringify({
@@ -106,5 +106,36 @@ describe("run cost persistence", () => {
     expect(readRunCost(root, "job", "run")).toMatchObject({ totalCostUsd: 0.12, executionCostUsd: null, coverage: "partial" });
     writeRunCost(root, "job", "run", [tracker.snapshot(), { attempt: 2, complete: false, entries: [] }]);
     expect(readRunCost(root, "job", "run")).toMatchObject({ totalCostUsd: 0.24, coverage: "partial" });
+  });
+
+  it("adds Jev decision spend to the run total and reports its usage separately", () => {
+    fs.mkdirSync(getRunDir(root, "job", "run"), { recursive: true });
+    const tracker = new CostTracker("claude", 1);
+    tracker.consume(result(0.1));
+    writeRunCost(root, "job", "run", [tracker.snapshot()]);
+    writeEvaluationCost(root, "job", "run", "complete", tracker.snapshot().entries[0]);
+    writeRunDecision(root, "job", "run", {
+      version: 1, mode: "shadow", state: "complete", error: null, updatedAt: "2026-10-01T00:00:00Z", decision: null,
+      usage: { requests: 1, inputTokens: 8028, outputTokens: 112, costUsd: 0.0003, model: "typesafe/jev-1.13-20260917" },
+    });
+    expect(readRunCost(root, "job", "run")).toMatchObject({
+      totalCostUsd: 0.2003, executionCostUsd: 0.1, evaluationCostUsd: 0.1, decisionCostUsd: 0.0003,
+      decisionState: "complete", coverage: "complete", decision: { requests: 1, inputTokens: 8028 },
+    });
+  });
+
+  it("counts a decision whose provider reported no cost as usage without inventing spend, and a pending one as partial", () => {
+    fs.mkdirSync(getRunDir(root, "job", "run"), { recursive: true });
+    const tracker = new CostTracker("claude", 1);
+    tracker.consume(result(0.1));
+    writeRunCost(root, "job", "run", [tracker.snapshot()]);
+    writeEvaluationCost(root, "job", "run", "complete", tracker.snapshot().entries[0]);
+    writeRunDecision(root, "job", "run", {
+      version: 1, mode: "shadow", state: "complete", error: null, updatedAt: "2026-10-01T00:00:00Z", decision: null,
+      usage: { requests: 1, inputTokens: 500, outputTokens: 10, costUsd: null, model: null },
+    });
+    expect(readRunCost(root, "job", "run")).toMatchObject({ totalCostUsd: 0.2, decisionCostUsd: null, decision: { inputTokens: 500 }, coverage: "partial" });
+    writeRunDecision(root, "job", "run", { version: 1, mode: "enforce", state: "pending", error: null, updatedAt: "2026-10-01T00:00:00Z", decision: null, usage: null });
+    expect(readRunCost(root, "job", "run")).toMatchObject({ decisionState: "pending", coverage: "partial" });
   });
 });

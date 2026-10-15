@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getRuns, type CatchupQueueSnapshot, type RunResponse } from "../api-client";
+import {
+  getRuns,
+  type CatchupQueueSnapshot,
+  type RunResponse,
+} from "../api-client";
 import {
   catchupDelayMs,
   describeCatchup,
@@ -46,6 +50,10 @@ function run(overrides: Partial<RunResponse> = {}): RunResponse {
       attempts: [],
       evaluation: null,
       tokens: null,
+      // contract extension 2026-10-01: Jev decision metric
+      decisionCostUsd: null,
+      decisionState: "off",
+      decision: null,
     },
     ...overrides,
   };
@@ -277,6 +285,8 @@ describe("getRuns trigger parameter", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("[]"));
     vi.stubGlobal("fetch", fetchMock);
     await getRuns({ job: "daily-check", trigger: "catchup", limit: 50 });
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/runs?job=daily-check&trigger=catchup&limit=50");
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/runs?job=daily-check&trigger=catchup&limit=50",
+    );
   });
 });

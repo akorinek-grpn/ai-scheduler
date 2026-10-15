@@ -37,6 +37,10 @@ function run(overrides: Partial<RunResponse> = {}): RunResponse {
       attempts: [],
       evaluation: null,
       tokens: null,
+      // contract extension 2026-10-01: Jev decision metric
+      decisionCostUsd: null,
+      decisionState: "off",
+      decision: null,
     },
     ...overrides,
   };

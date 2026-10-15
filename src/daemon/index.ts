@@ -7,16 +7,27 @@ import { CronEngine } from "./cron-engine";
 import { createApp } from "./api";
 import { getDaemonJsonPath, getRunsDir, getStatusPath } from "@shared/paths";
 import { startCatchup } from "./catchup-wiring";
+import { startHostSync } from "./host-sync";
 import { canConnect, NETWORK_PROBE, waitForNetwork } from "./network-gate";
 import { listenExclusive, PortInUseError } from "./single-instance";
 import { backfillActivityHistory, discardProvisionalRunStats } from "./stats";
 import type { DaemonHealth, RunStatusFile } from "@shared/types";
+import type { SchedulerConfig } from "@shared/config-schema";
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
 const CONFIG_PATH = path.join(PROJECT_ROOT, "scheduler.yaml");
 const DAEMON_PORT = 3501;
 
-function writeDaemonJson(startedAt: string, port: number): void {
+/** " for <role> (<host>)" when scheduler.yaml declares hosts, else "". */
+function describeHost(config: SchedulerConfig): string {
+  return config.host ? ` for ${config.host.role} (${config.host.name})` : "";
+}
+
+function writeDaemonJson(
+  startedAt: string,
+  port: number,
+  host: SchedulerConfig["host"],
+): void {
   const daemonJsonPath = getDaemonJsonPath(PROJECT_ROOT);
   fs.mkdirSync(path.dirname(daemonJsonPath), { recursive: true });
 
@@ -27,6 +38,7 @@ function writeDaemonJson(startedAt: string, port: number): void {
     startedAt,
     lastHeartbeat: new Date().toISOString(),
     activeJobs: [],
+    ...(host ? { host } : {}),
   };
   fs.writeFileSync(daemonJsonPath, JSON.stringify(health, null, 2));
 }
@@ -38,6 +50,7 @@ function startHeartbeat(
 ): NodeJS.Timeout {
   return setInterval(() => {
     const daemonJsonPath = getDaemonJsonPath(PROJECT_ROOT);
+    const host = engine.getCurrentConfig()?.host;
     const health: DaemonHealth = {
       status: "running",
       pid: process.pid,
@@ -45,6 +58,7 @@ function startHeartbeat(
       startedAt,
       lastHeartbeat: new Date().toISOString(),
       activeJobs: engine.getActiveJobIds(),
+      ...(host ? { host } : {}),
     };
     fs.writeFileSync(daemonJsonPath, JSON.stringify(health, null, 2));
   }, 30_000);
@@ -79,7 +93,7 @@ function watchConfig(engine: CronEngine): void {
       if (result.success) {
         engine.loadJobs(result.data);
         console.log(
-          `[daemon] Reloaded config: ${Object.keys(result.data.jobs).length} jobs`,
+          `[daemon] Reloaded config: ${Object.keys(result.data.jobs).length} jobs${describeHost(result.data)}`,
         );
       } else {
         console.error(`[daemon] Config reload failed: ${result.error}`);
@@ -185,7 +199,7 @@ async function main(): Promise<void> {
   });
 
   console.log(
-    `[daemon] Loaded ${Object.keys(configResult.data.jobs).length} jobs`,
+    `[daemon] Loaded ${Object.keys(configResult.data.jobs).length} jobs${describeHost(configResult.data)}`,
   );
   console.log(
     `[daemon] Scheduled: ${engine.getRegisteredJobIds().join(", ") || "(none)"}`,
@@ -196,15 +210,21 @@ async function main(): Promise<void> {
   app0.use(app);
   console.log(`[daemon] API listening on http://127.0.0.1:${DAEMON_PORT}`);
 
-  writeDaemonJson(startedAt, DAEMON_PORT);
+  writeDaemonJson(startedAt, DAEMON_PORT, configResult.data.host);
   const heartbeatInterval = startHeartbeat(engine, startedAt, DAEMON_PORT);
   watchConfig(engine);
+  // Share run data with the other hosts in scheduler.yaml, so each web UI can show both.
+  const hostSync = startHostSync({
+    projectRoot: PROJECT_ROOT,
+    getConfig: () => engine.getCurrentConfig(),
+  });
 
   const shutdown = () => {
     console.log("\n[daemon] Shutting down...");
     engine.stopAll();
     clearInterval(heartbeatInterval);
     catchup.stop();
+    hostSync.stop();
     server.close();
 
     const daemonJsonPath = getDaemonJsonPath(PROJECT_ROOT);

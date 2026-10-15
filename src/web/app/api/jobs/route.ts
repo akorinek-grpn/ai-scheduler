@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import fs from "fs";
 import path from "path";
 
@@ -14,11 +14,12 @@ function getDaemonUrl(): string | null {
   }
 }
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   const url = getDaemonUrl();
   if (!url) return NextResponse.json([], { status: 503 });
   try {
-    const res = await fetch(`${url}/api/jobs`);
+    // ?host= selects whose jobs (another Mac's are read-only).
+    const res = await fetch(`${url}/api/jobs${request.nextUrl.search}`);
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });
   } catch {

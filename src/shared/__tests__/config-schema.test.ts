@@ -47,8 +47,34 @@ describe("configSchema", () => {
       expect(result.data.defaults.timeout).toBe(300);
       expect(result.data.defaults.max_retries).toBe(0);
       expect(result.data.defaults.retain_runs).toBe(50);
+      expect(result.data.defaults.priority).toBe("background");
       expect(result.data.jobs["my-job"].enabled).toBe(true);
+      expect(result.data.jobs["my-job"].priority).toBeUndefined();
     }
+  });
+
+  it("accepts a per-job priority override and rejects unknown values", () => {
+    const base = {
+      version: 1,
+      jobs: {
+        "my-job": {
+          name: "My Job",
+          schedule: "0 9 * * *",
+          directory: "/tmp/test",
+          prompt: "Do something",
+          priority: "normal",
+        },
+      },
+    };
+    const ok = configSchema.safeParse(base);
+    expect(ok.success).toBe(true);
+    if (ok.success) expect(ok.data.jobs["my-job"].priority).toBe("normal");
+
+    const bad = configSchema.safeParse({
+      ...base,
+      jobs: { "my-job": { ...base.jobs["my-job"], priority: "low" } },
+    });
+    expect(bad.success).toBe(false);
   });
 
   it("rejects config without version", () => {

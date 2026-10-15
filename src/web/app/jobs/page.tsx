@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RunHistoryDots } from "@/components/run-history-dots";
 import { getJobs, getRuns, triggerJob, setJobEnabled, type JobResponse, type RunResponse } from "@/lib/api-client";
+import { HostBadge, PlacementBadge, useHostView } from "@/components/host-view";
 import { formatCronHuman } from "@/lib/format-cron";
 import { JobCost } from "@/components/cost-value";
 import { COST_DISCLAIMER } from "@/lib/cost-format";
@@ -98,14 +99,15 @@ export default function JobsPage(): React.ReactElement {
   const [typeFilter, setTypeFilter] = useState<"all" | "claude" | "script">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
+  const { hostParam } = useHostView();
   const fetchAll = useCallback(async () => {
     const [j, r] = await Promise.all([
-      getJobs().catch(() => []),
-      getRuns({ limit: 100 }).catch(() => []),
+      getJobs(hostParam).catch(() => []),
+      getRuns({ limit: 100, host: hostParam }).catch(() => []),
     ]);
     setJobs(j);
     setRuns(r);
-  }, []);
+  }, [hostParam]);
 
   useEffect(() => {
     fetchAll();
@@ -177,8 +179,8 @@ export default function JobsPage(): React.ReactElement {
     }
   };
 
-  const getJobRuns = (jobId: string): RunResponse[] =>
-    runs.filter((r) => r.jobId === jobId);
+  const getJobRuns = (job: JobResponse): RunResponse[] =>
+    runs.filter((r) => r.jobId === job.id && (!job.host || !r.host || r.host === job.host));
 
   return (
     <div className="space-y-6">
@@ -282,7 +284,7 @@ export default function JobsPage(): React.ReactElement {
           </div>
           <div className="space-y-3">
             {group.jobs.map((job) => {
-              const jobRuns = getJobRuns(job.id);
+              const jobRuns = getJobRuns(job);
               const lastRun = jobRuns[0];
               const lastEval = jobRuns.find((r) => r.evaluation)?.evaluation;
               const completedRuns = jobRuns.filter((r) => r.status !== "running");
@@ -292,11 +294,13 @@ export default function JobsPage(): React.ReactElement {
                 : null;
 
               return (
-                <Card key={job.id} className={!job.enabled ? "opacity-50" : ""}>
+                <Card key={`${job.host ?? ""}/${job.id}`} className={!job.enabled ? "opacity-50" : ""}>
                   <CardContent className="flex items-start gap-4 py-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-sm">{job.name}</span>
+                        <HostBadge name={job.host} compact />
+                        <PlacementBadge runsOn={job.runs_on} />
                         <Badge variant="outline" className="text-[10px] text-muted-foreground/70">
                           {job.type}
                         </Badge>
@@ -378,22 +382,30 @@ export default function JobsPage(): React.ReactElement {
                             last {lastRun.status}
                           </span>
                         )}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className={job.enabled ? "text-muted-foreground" : "text-green-500"}
-                          onClick={() => handleToggle(job.id, job.enabled)}
-                          disabled={togglingId === job.id || job.isActive}
-                        >
-                          {togglingId === job.id ? "..." : job.enabled ? "Disable" : "Enable"}
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={() => handleTrigger(job.id)}
-                          disabled={triggeringId === job.id || job.isActive || !job.enabled}
-                        >
-                          {triggeringId === job.id ? "Starting..." : "Run now"}
-                        </Button>
+                        {job.readOnly ? (
+                          <span className="text-xs text-muted-foreground">
+                            {job.isActive ? "running there · read-only" : "read-only"}
+                          </span>
+                        ) : (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className={job.enabled ? "text-muted-foreground" : "text-green-500"}
+                              onClick={() => handleToggle(job.id, job.enabled)}
+                              disabled={togglingId === job.id || job.isActive}
+                            >
+                              {togglingId === job.id ? "..." : job.enabled ? "Disable" : "Enable"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() => handleTrigger(job.id)}
+                              disabled={triggeringId === job.id || job.isActive || !job.enabled}
+                            >
+                              {triggeringId === job.id ? "Starting..." : "Run now"}
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </div>
                   </CardContent>

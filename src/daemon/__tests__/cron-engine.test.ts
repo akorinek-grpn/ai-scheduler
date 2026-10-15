@@ -14,7 +14,7 @@ describe("CronEngine", () => {
 
   const makeConfig = (jobs: SchedulerConfig["jobs"]): SchedulerConfig => ({
     version: 1,
-    defaults: { timeout: 300, max_retries: 0, retain_runs: 50 },
+    defaults: { timeout: 300, max_retries: 0, retain_runs: 50, priority: "background" },
     jobs,
   });
 

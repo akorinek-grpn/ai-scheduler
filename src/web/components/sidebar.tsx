@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { getCatchupQueue, getHealth, type HealthResponse } from "@/lib/api-client";
 import { CATCHUP_RUNS_HREF, pendingCatchupCount } from "@/lib/catchup-runs";
 import { useNotificationContext } from "@/components/notification-provider";
+import { HostSwitcher } from "@/components/host-view";
 
 const navItems = [
   { href: "/", label: "Dashboard", key: "D" },
@@ -13,6 +14,7 @@ const navItems = [
   { href: "/jobs", label: "Jobs", key: "J" },
   { href: "/runs", label: "Runs", key: "R" },
   { href: "/research", label: "Research", key: "X" },
+  { href: "/hosts", label: "Hosts", key: "H" },
   { href: "/config", label: "Config", key: "C" },
 ];
 
@@ -145,6 +147,8 @@ export function Sidebar(): React.ReactElement {
           })}
         </nav>
 
+        <HostSwitcher />
+
         {/* Status bar at bottom */}
         <div className="border-t border-border px-3 py-2 space-y-1">
           <button
@@ -184,8 +188,8 @@ export function Sidebar(): React.ReactElement {
             <div
               className={`h-1.5 w-1.5 rounded-full ${health ? "bg-green-500" : "bg-muted-foreground/50"}`}
             />
-            <span className="text-[11px] font-mono text-muted-foreground">
-              {health ? `pid ${health.pid}` : "offline"}
+            <span className="text-[11px] font-mono text-muted-foreground truncate">
+              {health ? (health.host ? health.host.role : `pid ${health.pid}`) : "offline"}
             </span>
           </div>
         </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { runHref } from "@/lib/api-client";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import type { RunResponse } from "@/lib/api-client";
@@ -56,7 +57,7 @@ export function AiInsights({ runs }: AiInsightsProps): React.ReactElement {
           return (
             <Link
               key={`${run.jobId}-${run.runId}`}
-              href={`/runs/${run.jobId}/${run.runId}`}
+              href={runHref(run)}
               className="flex items-baseline gap-2 rounded px-2 py-1.5 transition-colors hover:bg-secondary/50 group"
             >
               <span className={`text-[12px] font-medium shrink-0 ${color}`}>{severityIcon[ev.severity]}</span>

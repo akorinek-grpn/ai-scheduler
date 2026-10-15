@@ -20,6 +20,7 @@ import {
   type RunResponse,
   type CatchupQueueSnapshot,
 } from "@/lib/api-client";
+import { useHostView } from "@/components/host-view";
 
 const GROUP_ORDER = ["daily", "weekly", "periodic"] as const;
 const GROUP_META: Record<string, { label: string; desc: string }> = {
@@ -59,6 +60,7 @@ function categorizeJobs(jobs: JobResponse[]): JobGroup[] {
 }
 
 export default function DashboardPage(): React.ReactElement {
+  const { hostParam, isOther, viewed } = useHostView();
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [jobs, setJobs] = useState<JobResponse[]>([]);
   const [runs, setRuns] = useState<RunResponse[]>([]);
@@ -69,10 +71,11 @@ export default function DashboardPage(): React.ReactElement {
     try {
       const [h, j, r, c, cr] = await Promise.all([
         getHealth().catch(() => null),
-        getJobs().catch(() => []),
-        getRuns({ limit: 200 }).catch(() => []),
-        getCatchupQueue().catch(() => null),
-        getRuns({ trigger: "catchup", limit: 50 }).catch(() => []),
+        getJobs(hostParam).catch(() => []),
+        getRuns({ limit: 200, host: hostParam }).catch(() => []),
+        // The catch-up queue is this daemon's live state; another host's is not visible here.
+        hostParam ? Promise.resolve(null) : getCatchupQueue().catch(() => null),
+        getRuns({ trigger: "catchup", limit: 50, host: hostParam }).catch(() => []),
       ]);
       setHealth(h);
       setJobs(j);
@@ -82,7 +85,7 @@ export default function DashboardPage(): React.ReactElement {
     } catch {
       // silently fail
     }
-  }, []);
+  }, [hostParam]);
 
   useEffect(() => {
     fetchAll();
@@ -90,14 +93,22 @@ export default function DashboardPage(): React.ReactElement {
     return () => clearInterval(interval);
   }, [fetchAll]);
 
-  const getJobRuns = (jobId: string): RunResponse[] =>
-    runs.filter((r) => r.jobId === jobId).slice(0, 10);
+  // Another host's status line shows that host's daemon, as its last health probe saw it.
+  const shownHealth: HealthResponse | null = isOther ? viewed?.health ?? null : health;
+
+  const getJobRuns = (job: JobResponse): RunResponse[] =>
+    runs.filter((r) => r.jobId === job.id && (!job.host || !r.host || r.host === job.host)).slice(0, 10);
 
   const jobGroups = useMemo(() => categorizeJobs(jobs), [jobs]);
 
   return (
-    <div className="space-y-5 max-w-6xl">
-      <StatsCards jobs={jobs} runs={runs} health={health} />
+    <div className="space-y-5">
+      <StatsCards
+        jobs={jobs}
+        runs={runs}
+        health={shownHealth}
+        unknownLabel={isOther && viewed && !viewed.ssh ? "Not checked from here" : undefined}
+      />
 
       {/* The panel keeps only catch-ups; the recent runs are merged in for a daemon that ignores ?trigger=. */}
       <CatchupRunsPanel runs={catchupRuns.concat(runs)} queue={catchups} />
@@ -134,9 +145,9 @@ export default function DashboardPage(): React.ReactElement {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
             {group.jobs.map((job) => (
               <JobCard
-                key={job.id}
+                key={`${job.host ?? ""}/${job.id}`}
                 job={job}
-                recentRuns={getJobRuns(job.id)}
+                recentRuns={getJobRuns(job)}
                 onTrigger={fetchAll}
               />
             ))}

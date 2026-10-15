@@ -27,6 +27,13 @@ function formatSingleTime(hour: number, min: string): string {
   return `${h12}:${m} ${ampm}`;
 }
 
+/** 0 -> "12 AM", 6 -> "6 AM", 12 -> "12 PM", 22 -> "10 PM" */
+function formatHour(hour: number): string {
+  const ampm = hour >= 12 ? "PM" : "AM";
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12} ${ampm}`;
+}
+
 function formatTimes(hour: string, min: string): string {
   // Handle comma-separated hours: "16,19,22" → "4:00 PM, 7:00 PM & 10:00 PM"
   if (hour.includes(",")) {
@@ -76,6 +83,24 @@ export function formatCronHuman(cron: string): string {
   if (min === "0" && hour.startsWith("*/")) {
     const suffix = dow !== "*" ? `, ${formatDays(dow).toLowerCase()}` : "";
     return `Every ${hour.slice(2)} hours${suffix}`;
+  }
+
+  // Every hour at a fixed minute: "50 * * * *" -> "Every hour at :50"
+  if (/^\d+$/.test(min) && hour === "*" && dom === "*") {
+    const at = `every hour at :${min.padStart(2, "0")}`;
+    return dow === "*" ? `E${at.slice(1)}` : `${formatDays(dow)}, ${at}`;
+  }
+
+  // Hour ranges are hourly windows: "0 6-22 * * 1-5" -> "Weekdays, hourly at :00 from 6 AM to 10 PM"
+  if (/^\d+$/.test(min) && dom === "*" && /^(\d+(-\d+)?)(,\d+(-\d+)?)*$/.test(hour) && hour.includes("-")) {
+    const windows = hour.split(",").map((part) => {
+      const [from, to] = part.split("-").map((h) => formatHour(parseInt(h, 10)));
+      return to ? `${from} to ${to}` : from;
+    });
+    const list = windows.length > 1
+      ? `${windows.slice(0, -1).join(", ")} & ${windows[windows.length - 1]}`
+      : windows[0];
+    return `${formatDays(dow)}, hourly at :${min.padStart(2, "0")} from ${list}`;
   }
 
   const time = formatTimes(hour, min);

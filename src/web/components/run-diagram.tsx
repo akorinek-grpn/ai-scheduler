@@ -27,6 +27,8 @@ interface RunDiagramProps {
   run: RunResponse;
   /** False while the Diagram tab is hidden: polling pauses, and resumes with an immediate refresh. */
   active?: boolean;
+  /** Host that ran it, on a multi-host setup. */
+  host?: string;
 }
 
 /**
@@ -39,6 +41,7 @@ export function RunDiagram({
   runId,
   run,
   active = true,
+  host,
 }: RunDiagramProps): React.ReactElement {
   const key = `${jobId}/${runId}`;
   const [stored, setStored] = useState<GraphState>({
@@ -69,7 +72,7 @@ export function RunDiagram({
       controller = request;
       const timeout = setTimeout(() => request.abort(), REQUEST_TIMEOUT_MS);
       try {
-        const graph: unknown = await getRunGraph(jobId, runId, request.signal);
+        const graph: unknown = await getRunGraph(jobId, runId, request.signal, host);
         if (disposed) return;
         if (!isRunGraph(graph))
           throw new Error(
@@ -111,7 +114,7 @@ export function RunDiagram({
       controller?.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [jobId, runId, key, runIsLive, reload, active]);
+  }, [jobId, runId, key, runIsLive, reload, active, host]);
 
   const retry = (): void => {
     settledKey.current = null;

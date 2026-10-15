@@ -4,7 +4,8 @@ import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { RunsTable } from "@/components/runs-table";
-import { getRuns, getJobs, type RunResponse, type JobResponse } from "@/lib/api-client";
+import { getRuns, getJobs, getHealth, type RunResponse, type JobResponse, type HealthResponse } from "@/lib/api-client";
+import { useHostView } from "@/components/host-view";
 import { COST_DISCLAIMER } from "@/lib/cost-format";
 import { isCatchupRun } from "@/lib/catchup-runs";
 
@@ -20,7 +21,15 @@ function RunHistoryContent(): React.ReactElement {
   const jobFilter = searchParams.get("job") || null;
   // ?trigger=catchup is where the sidebar pill and the dashboard's catch-up panel link to.
   const catchupOnly = searchParams.get("trigger") === "catchup";
+  // ?scope=all also lists this Mac's runs of jobs that now run elsewhere (history from before the
+  // move); the default shows the jobs placed here.
+  const allHosts = searchParams.get("scope") === "all";
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  // Whose runs: ?host= (from a link, e.g. the cost list) wins over the sidebar's choice.
+  const { hostParam: viewHost, isSelfHost } = useHostView();
+  const linkedHost = searchParams.get("host");
+  const hostParam = linkedHost ? (isSelfHost(linkedHost) ? undefined : linkedHost) : viewHost;
 
   const replaceQuery = (edit: (query: URLSearchParams) => void): void => {
     const query = new URLSearchParams(searchParams.toString());
@@ -42,20 +51,31 @@ function RunHistoryContent(): React.ReactElement {
     });
   };
 
+  const setAllHosts = (on: boolean): void => {
+    replaceQuery((query) => {
+      if (on) query.set("scope", "all");
+      else query.delete("scope");
+    });
+  };
+
   const fetchAll = useCallback(async () => {
-    const [r, j] = await Promise.all([
+    const [r, j, h] = await Promise.all([
       getRuns({
         limit: 200,
         ...(jobFilter ? { job: jobFilter } : {}),
         ...(statusFilter ? { status: statusFilter } : {}),
         ...(catchupOnly ? { trigger: "catchup" as const } : {}),
+        ...(allHosts ? { scope: "all" as const } : {}),
+        host: hostParam,
       }).catch(() => []),
-      getJobs().catch(() => []),
+      getJobs(hostParam).catch(() => []),
+      getHealth().catch(() => null),
     ]);
     // A daemon started before ?trigger= existed ignores it, so filter here too.
     setRuns(catchupOnly ? r.filter(isCatchupRun) : r);
     setJobs(j);
-  }, [jobFilter, statusFilter, catchupOnly]);
+    setHealth(h);
+  }, [jobFilter, statusFilter, catchupOnly, allHosts, hostParam]);
 
   useEffect(() => {
     fetchAll();
@@ -110,6 +130,17 @@ function RunHistoryContent(): React.ReactElement {
       </div>
 
       <p className="text-[11px] text-muted-foreground">{COST_DISCLAIMER} Partial totals exclude missing costs; unavailable is not zero.</p>
+      {health?.host && (
+        <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={allHosts}
+            onChange={(e) => setAllHosts(e.target.checked)}
+            className="h-3.5 w-3.5"
+          />
+          Include history of jobs that now run on another Mac
+        </label>
+      )}
       {jobFilter && <p className="text-[12px] text-muted-foreground">Job: {jobs.find((job) => job.id === jobFilter)?.name ?? jobFilter}</p>}
 
       {/* Filters */}
@@ -127,7 +158,7 @@ function RunHistoryContent(): React.ReactElement {
           >
             all
           </button>
-          {jobs.map((job) => (
+          {jobs.filter((job, i, all) => all.findIndex((other) => other.id === job.id) === i).map((job) => (
             <button
               key={job.id}
               onClick={() => setJobFilter(jobFilter === job.id ? null : job.id)}

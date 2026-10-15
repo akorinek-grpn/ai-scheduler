@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "daemon": "tsx src/daemon/index.ts",
-    "daemon:watch": "tsx watch src/daemon/index.ts",
+    "daemon": "./scripts/with-env.sh tsx src/daemon/index.ts",
+    "daemon:watch": "./scripts/with-env.sh tsx watch src/daemon/index.ts",
     "dev": "next dev src/web --port 3500 --turbopack",
     "build": "next build src/web",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "jev:report": "tsx scripts/jev-report.ts",
+    "janitor": "tsx scripts/janitor.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

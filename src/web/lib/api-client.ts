@@ -1,15 +1,29 @@
-import type { CostStatsResponse, CostTotals, RunCostSummary } from "../../shared/cost-types";
+import type {
+  CostStatsResponse,
+  CostTotals,
+  RunCostSummary,
+} from "../../shared/cost-types";
 import type { RunGraph } from "../../shared/run-graph-types";
+import type { RunDecision } from "../../shared/types";
 
 const DAEMON_API_BASE = "/api";
 
 export type CostPeriod = 7 | 30 | 90;
 
 export class ApiError extends Error {
-  constructor(message: string, public readonly status: number) {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+/** The host this daemon resolved from scheduler.yaml `hosts`; absent on a single-Mac setup. */
+export interface HostInfo {
+  name: string;
+  role: string;
 }
 
 export interface HealthResponse {
@@ -17,6 +31,41 @@ export interface HealthResponse {
   pid: number;
   startedAt: string;
   activeJobs: string[];
+  host?: HostInfo | null;
+}
+
+export interface HostJobSummary {
+  id: string;
+  name: string;
+  schedule: string;
+  enabled: boolean;
+  runs_on: string | string[];
+}
+
+/**
+ * Link to a run's page. A run from a multi-host setup carries the host that ran it, and the
+ * page needs it to read that host's data (another Mac's comes from its mirror).
+ */
+export function runHref(run: { jobId: string; runId: string; host?: string }, query = ""): string {
+  const params = new URLSearchParams(query.replace(/^\?/, ""));
+  if (run.host) params.set("host", run.host);
+  const qs = params.toString();
+  return `/runs/${encodeURIComponent(run.jobId)}/${encodeURIComponent(run.runId)}${qs ? `?${qs}` : ""}`;
+}
+
+export interface HostStatus {
+  name: string;
+  role: string;
+  ssh: string | null;
+  isSelf: boolean;
+  health: HealthResponse | null;
+  error: string | null;
+  jobs: HostJobSummary[];
+}
+
+export interface HostsResponse {
+  self: HostInfo | null;
+  hosts: HostStatus[];
 }
 
 export interface JobResponse {
@@ -31,8 +80,13 @@ export interface JobResponse {
   model?: string;
   timeout?: number;
   tags: string[];
+  runs_on?: string | string[];
   isActive: boolean;
   cost: CostTotals;
+  /** Host this entry belongs to, on a multi-host setup. */
+  host?: string;
+  /** Another host's job: shown, never triggered or toggled from here. */
+  readOnly?: boolean;
 }
 
 export interface RunEvaluation {
@@ -41,6 +95,7 @@ export interface RunEvaluation {
   followUpNeeded: boolean;
   followUpReason: string | null;
   evaluatedAt: string;
+  source?: "haiku" | "jev" | "jev+haiku";
 }
 
 export interface RunResponse {
@@ -54,9 +109,14 @@ export interface RunResponse {
   finishedAt: string | null;
   exitCode: number | null;
   evaluation?: RunEvaluation;
+  decision?: RunDecision;
   catchupFor?: string;
+  /** Inner Claude sessions a script run started (autopilot's b2c-toolkit runs). */
+  innerSessions?: number;
   cost: RunCostSummary;
   configuredModel?: string;
+  /** Host that ran it, on a multi-host setup. */
+  host?: string;
 }
 
 export interface LogResponse {
@@ -69,9 +129,13 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${DAEMON_API_BASE}${path}`, options);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    const message = err && typeof err === "object" && "error" in err && typeof err.error === "string"
-      ? err.error
-      : res.statusText;
+    const message =
+      err &&
+      typeof err === "object" &&
+      "error" in err &&
+      typeof err.error === "string"
+        ? err.error
+        : res.statusText;
     throw new ApiError(message || `Request failed (${res.status})`, res.status);
   }
   return res.json() as Promise<T>;
@@ -81,21 +145,41 @@ export function getHealth(): Promise<HealthResponse> {
   return fetchApi("/health");
 }
 
-export function getJobs(): Promise<JobResponse[]> {
-  return fetchApi("/jobs");
+/** host: undefined for this Mac, "all", or a host name from scheduler.yaml. */
+function hostQuery(host: string | undefined, prefix = "?"): string {
+  return host ? `${prefix}host=${encodeURIComponent(host)}` : "";
+}
+
+export function getJobs(host?: string): Promise<JobResponse[]> {
+  return fetchApi(`/jobs${hostQuery(host)}`);
+}
+
+export function getHosts(): Promise<HostsResponse> {
+  return fetchApi("/hosts");
 }
 
 export function getRuns(params?: {
   job?: string;
   status?: string;
   trigger?: RunResponse["trigger"];
+  /** host (default): jobs placed on the selected Mac; all: every run it produced. */
+  scope?: "host" | "all";
+  /** undefined for this Mac, "all", or a host name from scheduler.yaml. */
+  host?: string;
+  /** Runs that started at or after `since` and before `until`. */
+  since?: Date;
+  until?: Date;
   limit?: number;
 }): Promise<RunResponse[]> {
   const searchParams = new URLSearchParams();
+  if (params?.host) searchParams.set("host", params.host);
+  if (params?.since) searchParams.set("since", params.since.toISOString());
+  if (params?.until) searchParams.set("until", params.until.toISOString());
   if (params?.job) searchParams.set("job", params.job);
   if (params?.status) searchParams.set("status", params.status);
   // A daemon started before this parameter existed ignores it, so callers also filter client-side.
   if (params?.trigger) searchParams.set("trigger", params.trigger);
+  if (params?.scope) searchParams.set("scope", params.scope);
   if (params?.limit) searchParams.set("limit", params.limit.toString());
   const qs = searchParams.toString();
   return fetchApi(`/runs${qs ? `?${qs}` : ""}`);
@@ -105,19 +189,43 @@ export function getRunLog(
   jobId: string,
   runId: string,
   offset: number,
+  host?: string,
+  /** "session": the inner Claude sessions' text of a script run, instead of its output. */
+  file?: "session",
 ): Promise<LogResponse> {
-  return fetchApi(`/runs/${jobId}/${runId}/log?offset=${offset}`);
+  return fetchApi(
+    `/runs/${jobId}/${runId}/log?offset=${offset}${file ? `&file=${file}` : ""}${hostQuery(host, "&")}`,
+  );
 }
 
-export function getRun(jobId: string, runId: string, signal?: AbortSignal): Promise<RunResponse> {
-  return fetchApi(`/runs/${encodeURIComponent(jobId)}/${encodeURIComponent(runId)}`, { cache: "no-store", signal });
+export function getRun(
+  jobId: string,
+  runId: string,
+  signal?: AbortSignal,
+  host?: string,
+): Promise<RunResponse> {
+  return fetchApi(
+    `/runs/${encodeURIComponent(jobId)}/${encodeURIComponent(runId)}${hostQuery(host)}`,
+    { cache: "no-store", signal },
+  );
 }
 
-export function getRunGraph(jobId: string, runId: string, signal?: AbortSignal): Promise<RunGraph> {
-  return fetchApi(`/runs/${encodeURIComponent(jobId)}/${encodeURIComponent(runId)}/graph`, { cache: "no-store", signal });
+export function getRunGraph(
+  jobId: string,
+  runId: string,
+  signal?: AbortSignal,
+  host?: string,
+): Promise<RunGraph> {
+  return fetchApi(
+    `/runs/${encodeURIComponent(jobId)}/${encodeURIComponent(runId)}/graph${hostQuery(host)}`,
+    { cache: "no-store", signal },
+  );
 }
 
-export function getCostStats(days: CostPeriod = 30, signal?: AbortSignal): Promise<CostStatsResponse> {
+export function getCostStats(
+  days: CostPeriod = 30,
+  signal?: AbortSignal,
+): Promise<CostStatsResponse> {
   return fetchApi(`/stats/costs?days=${days}`, { cache: "no-store", signal });
 }
 
@@ -149,6 +257,14 @@ export interface ActivityStatsResponse {
     toolsByName: Record<string, number>;
   };
   daily: ActivityDayBucket[];
+  /** Per host on a multi-host setup; the top level is their sum. */
+  hosts?: {
+    name: string;
+    role: string;
+    isSelf: boolean;
+    lifetime: ActivityStatsResponse["lifetime"];
+    daily: ActivityDayBucket[];
+  }[];
 }
 
 export function getActivityStats(days = 30): Promise<ActivityStatsResponse> {

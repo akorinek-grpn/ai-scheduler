@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
 import { NotificationProvider } from "@/components/notification-provider";
+import { HostBanner, HostViewProvider } from "@/components/host-view";
 
 const geist = Geist({
   variable: "--font-geist",
@@ -34,18 +35,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }):
       </head>
       <body className={`${geist.variable} ${geistMono.variable} font-sans antialiased`}>
         <NotificationProvider>
-          <div className="flex h-screen">
-            <a
-              href="#main-content"
-              className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-2 focus:left-2 focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-sm focus:text-primary-foreground"
-            >
-              Skip to content
-            </a>
-            <Sidebar />
-            <main id="main-content" className="flex-1 overflow-auto p-4 md:p-6" tabIndex={-1}>
-              {children}
-            </main>
-          </div>
+          <HostViewProvider>
+            <div className="flex h-screen">
+              <a
+                href="#main-content"
+                className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-2 focus:left-2 focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-sm focus:text-primary-foreground"
+              >
+                Skip to content
+              </a>
+              <Sidebar />
+              <main id="main-content" className="flex-1 overflow-auto p-4 md:p-6" tabIndex={-1}>
+                <HostBanner />
+                {children}
+              </main>
+            </div>
+          </HostViewProvider>
         </NotificationProvider>
       </body>
     </html>

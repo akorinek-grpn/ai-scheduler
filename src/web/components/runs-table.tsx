@@ -1,11 +1,13 @@
 "use client";
 
+import { runHref } from "@/lib/api-client";
 import { useMemo, Fragment } from "react";
 import Link from "next/link";
 import type { RunResponse, RunEvaluation } from "@/lib/api-client";
 import { CostValue } from "./cost-value";
 import { ModelLabels } from "./model-labels";
 import { CatchupBadge } from "./catchup-badge";
+import { HostBadge } from "./host-view";
 import { getExecutionModels } from "../../shared/model-usage";
 
 interface RunsTableProps {
@@ -131,7 +133,7 @@ function RunRow({ run }: { run: RunResponse }): React.ReactElement {
 
   return (
     <Link
-      href={`/runs/${run.jobId}/${run.runId}`}
+      href={runHref(run)}
       className={`
         flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 px-3 py-1.5 rounded transition-colors
         hover:bg-secondary/60 focus-visible:outline-2 focus-visible:outline-ring
@@ -145,6 +147,7 @@ function RunRow({ run }: { run: RunResponse }): React.ReactElement {
       <span className={`text-[13px] w-[180px] truncate shrink-0 ${isBad || isPartial ? "font-medium" : ""} ${isBad ? "text-red-500" : isPartial ? "text-amber-500" : ""}`}>
         {run.jobName}
       </span>
+      <HostBadge name={run.host} compact />
 
       {/* Eval one-liner */}
       <span className="flex-1 basis-full sm:basis-auto min-w-0 truncate text-[12px]">

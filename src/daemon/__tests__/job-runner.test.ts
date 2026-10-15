@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { runJob, countToolUseInStreamEvent } from "../job-runner";
+import { runJob, countToolUseInStreamEvent, withPriority } from "../job-runner";
 import { getStatsPath } from "@shared/paths";
 import fs from "fs";
 import path from "path";
@@ -25,7 +25,64 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+describe("withPriority", () => {
+  it("leaves a normal-priority command untouched", () => {
+    expect(withPriority("echo", ["hi"], "normal", "darwin")).toEqual({
+      command: "echo",
+      args: ["hi"],
+    });
+  });
+
+  it("clamps a background job with taskpolicy on macOS and nice elsewhere, never on Windows", () => {
+    // The darwin branch needs /usr/sbin/taskpolicy, which every macOS ships; the suite runs there.
+    expect(withPriority("echo", ["hi"], "background", "darwin")).toEqual({
+      command: "/usr/sbin/taskpolicy",
+      args: ["-c", "background", "echo", "hi"],
+    });
+    expect(withPriority("echo", ["hi"], "background", "linux")).toEqual({
+      command: "nice",
+      args: ["-n", "19", "echo", "hi"],
+    });
+    expect(withPriority("echo", ["hi"], "background", "win32")).toEqual({
+      command: "echo",
+      args: ["hi"],
+    });
+  });
+});
+
 describe("runJob", () => {
+  it("runs a background-priority job through the clamp with its output and exit code intact", async () => {
+    const ok = await runJob({
+      jobId: "test-job",
+      jobConfig: testJob,
+      projectRoot: tmpDir,
+      trigger: "manual",
+      command: "sh",
+      args: ["-c", "echo clamped"],
+      priority: "background",
+    });
+    expect(ok.status).toBe("success");
+    const log = fs.readFileSync(
+      path.join(tmpDir, "data", "runs", "test-job", ok.runId, "output.log"),
+      "utf-8",
+    );
+    expect(log).toContain("clamped");
+
+    // The wrapper execs the program in place, so the program's own exit code must
+    // come back, not the wrapper's.
+    const failed = await runJob({
+      jobId: "test-job",
+      jobConfig: testJob,
+      projectRoot: tmpDir,
+      trigger: "manual",
+      command: "sh",
+      args: ["-c", "exit 3"],
+      priority: "background",
+    });
+    expect(failed.status).toBe("failed");
+    expect(failed.exitCode).toBe(3);
+  });
+
   it("creates run directory with meta.json and status.json", async () => {
     const run = await runJob({
       jobId: "test-job",
@@ -159,10 +216,7 @@ describe("runJob", () => {
       trigger: "manual",
       command: "/bin/sh",
       // The grandchild outlives the shell and touches the marker if it survives.
-      args: [
-        "-c",
-        `sh -c 'sleep 3; printf alive > "${marker}"' & wait`,
-      ],
+      args: ["-c", `sh -c 'sleep 3; printf alive > "${marker}"' & wait`],
       defaultTimeout: timeoutSec,
       sigkillGraceMs: 200,
     });
@@ -382,7 +436,9 @@ describe("runJob scheduler env", () => {
           command: "sh",
           args: printEnv,
         });
-        expect(logOf(run.runId)).toContain(`trigger=${trigger} catchupFor=unset`);
+        expect(logOf(run.runId)).toContain(
+          `trigger=${trigger} catchupFor=unset`,
+        );
       } finally {
         delete process.env.SCHEDULER_CATCHUP_FOR;
       }

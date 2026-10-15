@@ -10,9 +10,11 @@ interface StatsCardsProps {
   jobs: JobResponse[];
   runs: RunResponse[];
   health: HealthResponse | null;
+  /** Shown instead of "Offline" when health is unknown rather than down (another Mac this one cannot reach). */
+  unknownLabel?: string;
 }
 
-export function StatsCards({ jobs, runs, health }: StatsCardsProps): React.ReactElement {
+export function StatsCards({ jobs, runs, health, unknownLabel }: StatsCardsProps): React.ReactElement {
   const enabledCount = jobs.filter((j) => j.enabled).length;
   const todayRuns = runs.filter((r) => {
     return new Date(r.startedAt).toDateString() === new Date().toDateString();
@@ -29,7 +31,7 @@ export function StatsCards({ jobs, runs, health }: StatsCardsProps): React.React
       <div className="flex items-center gap-2">
         <div className={`h-2 w-2 rounded-full ${health ? "bg-green-500" : "bg-muted-foreground/50"}`} />
         <span className="text-[13px] font-medium">
-          {health ? "Online" : "Offline"}
+          {health ? "Online" : unknownLabel ?? "Offline"}
         </span>
       </div>
 

@@ -17,7 +17,7 @@ function getDaemonUrl(): string | null {
 
 /** Proxies the daemon's run graph (the Diagram view's data); never cached, since live runs change every poll. */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ jobId: string; runId: string }> },
 ): Promise<NextResponse> {
   const { jobId, runId } = await params;
@@ -30,7 +30,7 @@ export async function GET(
   let response: Response;
   try {
     response = await fetch(
-      `${url}/api/runs/${encodeURIComponent(jobId)}/${encodeURIComponent(runId)}/graph`,
+      `${url}/api/runs/${encodeURIComponent(jobId)}/${encodeURIComponent(runId)}/graph${request.nextUrl.search}`,
       {
         cache: "no-store",
         signal: AbortSignal.timeout(10_000),

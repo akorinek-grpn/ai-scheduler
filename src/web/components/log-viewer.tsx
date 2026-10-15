@@ -8,9 +8,13 @@ interface LogViewerProps {
   runId: string;
   /** False while the log's tab is hidden; once shown again it re-scrolls to the end if auto-scroll is on. */
   active?: boolean;
+  /** Host that ran it, on a multi-host setup. */
+  host?: string;
+  /** "session": the run's inner Claude session text instead of its output. */
+  file?: "session";
 }
 
-export function LogViewer({ jobId, runId, active = true }: LogViewerProps): React.ReactElement {
+export function LogViewer({ jobId, runId, active = true, host, file }: LogViewerProps): React.ReactElement {
   const [lines, setLines] = useState<string>("");
   const [offset, setOffset] = useState(0);
   const [isDone, setIsDone] = useState(false);
@@ -24,7 +28,7 @@ export function LogViewer({ jobId, runId, active = true }: LogViewerProps): Reac
     const poll = async () => {
       if (!active) return;
       try {
-        const data: LogResponse = await getRunLog(jobId, runId, offset);
+        const data: LogResponse = await getRunLog(jobId, runId, offset, host, file);
         if (!active) return;
 
         if (data.content) {
@@ -46,7 +50,7 @@ export function LogViewer({ jobId, runId, active = true }: LogViewerProps): Reac
       active = false;
       if (interval) clearInterval(interval);
     };
-  }, [jobId, runId, offset, isDone]);
+  }, [jobId, runId, offset, isDone, host, file]);
 
   // A hidden log cannot scroll, so the scroll to the end runs again when it is shown.
   useEffect(() => {

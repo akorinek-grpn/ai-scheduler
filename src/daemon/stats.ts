@@ -1,35 +1,71 @@
 import fs from "fs";
 import path from "path";
 
-import type { ActivityDayBucket, ActivityStatsResponse, RunMeta, RunStats, RunStatusFile } from "@shared/types";
-import { getLogPath, getMetaPath, getRunsDir, getStatsPath, getStatusPath } from "@shared/paths";
-import { readActivityRecord, readActivityRecords, runStatsSchema, writeActivityRecord, type ActivityRecord } from "./activity-store";
+import type {
+  ActivityDayBucket,
+  ActivityStatsResponse,
+  RunMeta,
+  RunStats,
+  RunStatusFile,
+} from "@shared/types";
+import {
+  getLogPath,
+  getMetaPath,
+  getRunsDir,
+  getStatsPath,
+  getStatusPath,
+} from "@shared/paths";
+import {
+  readActivityRecord,
+  readActivityRecords,
+  runStatsSchema,
+  writeActivityRecord,
+  type ActivityRecord,
+} from "./activity-store";
+import { snapshotRunCost } from "./cost-stats";
+import { producedBy, type HostDataRoot } from "./host-data";
 
 const TOOL_MARKER = /^> \[([^\]]+)\]/;
 
-function readRunStatus(projectRoot: string, jobId: string, runId: string): RunStatusFile["status"] | undefined {
+function readRunStatus(
+  projectRoot: string,
+  jobId: string,
+  runId: string,
+): RunStatusFile["status"] | undefined {
   try {
-    return (JSON.parse(fs.readFileSync(getStatusPath(projectRoot, jobId, runId), "utf-8")) as RunStatusFile).status;
+    return (
+      JSON.parse(
+        fs.readFileSync(getStatusPath(projectRoot, jobId, runId), "utf-8"),
+      ) as RunStatusFile
+    ).status;
   } catch {
     return undefined;
   }
 }
 
-export function discardProvisionalRunStats(projectRoot: string, jobId: string, runId: string): void {
+export function discardProvisionalRunStats(
+  projectRoot: string,
+  jobId: string,
+  runId: string,
+): void {
   if (readRunStatus(projectRoot, jobId, runId) !== "running") return;
   const statsPath = getStatsPath(projectRoot, jobId, runId);
   if (!fs.existsSync(statsPath)) return;
   const content = fs.readFileSync(statsPath, "utf-8");
   let finalized = false;
   try {
-    finalized = runStatsSchema.safeParse(JSON.parse(content)).data?.finalized === true;
+    finalized =
+      runStatsSchema.safeParse(JSON.parse(content)).data?.finalized === true;
   } catch {
     finalized = false;
   }
   if (!finalized) fs.rmSync(statsPath);
 }
 
-function backfillFromLog(logPath: string): { toolCalls: number; toolsByName: Record<string, number> } {
+function backfillFromLog(logPath: string): {
+  toolCalls: number;
+  toolsByName: Record<string, number>;
+} {
   const toolsByName: Record<string, number> = {};
   let toolCalls = 0;
 
@@ -56,7 +92,9 @@ export function getOrBackfillRunStats(
   const running = readRunStatus(projectRoot, jobId, runId) === "running";
   if (fs.existsSync(statsPath)) {
     try {
-      const stats = runStatsSchema.parse(JSON.parse(fs.readFileSync(statsPath, "utf-8")));
+      const stats = runStatsSchema.parse(
+        JSON.parse(fs.readFileSync(statsPath, "utf-8")),
+      );
       if (!running || stats.finalized === true) return stats;
     } catch {
       // Corrupt — fall through to backfill.
@@ -80,7 +118,8 @@ export function getOrBackfillRunStats(
 
   const type = meta.jobConfig?.type ?? "claude";
   const isAiSession = type === "claude";
-  if (isAiSession && !fs.existsSync(getLogPath(projectRoot, jobId, runId))) return null;
+  if (isAiSession && !fs.existsSync(getLogPath(projectRoot, jobId, runId)))
+    return null;
 
   const counts = isAiSession
     ? backfillFromLog(getLogPath(projectRoot, jobId, runId))
@@ -98,27 +137,54 @@ export function getOrBackfillRunStats(
   return stats;
 }
 
-function readRunActivity(projectRoot: string, jobId: string, runId: string): {
+function readRunActivity(
+  projectRoot: string,
+  jobId: string,
+  runId: string,
+): {
   record: ActivityRecord;
   completed: boolean;
 } | null {
   let meta: RunMeta;
   try {
-    meta = JSON.parse(fs.readFileSync(getMetaPath(projectRoot, jobId, runId), "utf-8"));
-    if (typeof meta?.startedAt !== "string" || !Number.isFinite(Date.parse(meta.startedAt))) return null;
+    meta = JSON.parse(
+      fs.readFileSync(getMetaPath(projectRoot, jobId, runId), "utf-8"),
+    );
+    if (
+      typeof meta?.startedAt !== "string" ||
+      !Number.isFinite(Date.parse(meta.startedAt))
+    )
+      return null;
   } catch {
     return null;
   }
   const status = readRunStatus(projectRoot, jobId, runId);
   const stats = getOrBackfillRunStats(projectRoot, jobId, runId);
   if (!stats) return null;
+  const jobName =
+    typeof meta.jobConfig?.name === "string" ? meta.jobConfig.name : jobId;
+  const cost = snapshotRunCost(projectRoot, jobId, runId, jobName);
   return {
-    record: { version: 1, jobId, runId, startedAt: meta.startedAt, stats },
-    completed: status !== undefined && ["success", "partial", "failed", "timeout"].includes(status),
+    record: {
+      version: 1,
+      jobId,
+      runId,
+      startedAt: meta.startedAt,
+      stats,
+      cost,
+      ...(typeof meta.host === "string" && meta.host ? { host: meta.host } : {}),
+    },
+    completed:
+      status !== undefined &&
+      ["success", "partial", "failed", "timeout"].includes(status),
   };
 }
 
-export function preserveRunActivity(projectRoot: string, jobId: string, runId: string): boolean {
+export function preserveRunActivity(
+  projectRoot: string,
+  jobId: string,
+  runId: string,
+): boolean {
   try {
     const activity = readRunActivity(projectRoot, jobId, runId);
     if (!activity?.completed) return false;
@@ -136,7 +202,9 @@ function syncRetainedActivity(projectRoot: string): ActivityRecord[] {
   const records: ActivityRecord[] = [];
   for (const job of fs.readdirSync(runsDir, { withFileTypes: true })) {
     if (!job.isDirectory()) continue;
-    for (const run of fs.readdirSync(path.join(runsDir, job.name), { withFileTypes: true })) {
+    for (const run of fs.readdirSync(path.join(runsDir, job.name), {
+      withFileTypes: true,
+    })) {
       if (!run.isDirectory() || run.name === "latest") continue;
       const activity = readRunActivity(projectRoot, job.name, run.name);
       if (!activity) continue;
@@ -158,17 +226,66 @@ function buildEmptyDailyBuckets(days: number): ActivityDayBucket[] {
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(todayUtc);
     d.setUTCDate(d.getUTCDate() - i);
-    buckets.push({ date: d.toISOString().slice(0, 10), sessions: 0, toolCalls: 0 });
+    buckets.push({
+      date: d.toISOString().slice(0, 10),
+      sessions: 0,
+      toolCalls: 0,
+    });
   }
   return buckets;
 }
 
-export function getActivityStats(projectRoot: string, days: number): ActivityStatsResponse {
+/** This host's records: preserved ones plus retained runs (written back as they complete). */
+function ownActivityRecords(projectRoot: string): Map<string, ActivityRecord> {
   const retained = syncRetainedActivity(projectRoot);
   const records = new Map<string, ActivityRecord>();
   for (const record of [...readActivityRecords(projectRoot), ...retained]) {
     records.set(JSON.stringify([record.jobId, record.runId]), record);
   }
+  return records;
+}
+
+/**
+ * Lifetime and daily AI-session activity. With `roots` (scheduler.yaml declares `hosts`), each
+ * host counts only the runs it produced - a mirror holds only what its host already preserved -
+ * and the response carries every host's share beside their sum.
+ */
+export function getActivityStats(
+  projectRoot: string,
+  days: number,
+  roots?: HostDataRoot[],
+): ActivityStatsResponse {
+  if (!roots) return aggregateActivity(ownActivityRecords(projectRoot).values(), days);
+
+  const seen = new Set<string>();
+  const perHost = roots.map((root) => {
+    const all = root.isSelf
+      ? [...ownActivityRecords(root.root).values()]
+      : readActivityRecords(root.root, { tolerant: true });
+    const records = all.filter((record) => {
+      if (!producedBy(root, record.host)) return false;
+      const key = JSON.stringify([record.jobId, record.runId]);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return { root, records };
+  });
+  return {
+    ...aggregateActivity(perHost.flatMap((h) => h.records), days),
+    hosts: perHost.map(({ root, records }) => ({
+      name: root.name,
+      role: root.role,
+      isSelf: root.isSelf,
+      ...aggregateActivity(records, days),
+    })),
+  };
+}
+
+function aggregateActivity(
+  records: Iterable<ActivityRecord>,
+  days: number,
+): ActivityStatsResponse {
   const daily = buildEmptyDailyBuckets(days);
   const bucketIndex = new Map(daily.map((b) => [b.date, b]));
 
@@ -178,7 +295,7 @@ export function getActivityStats(projectRoot: string, days: number): ActivitySta
     toolsByName: {} as Record<string, number>,
   };
 
-  for (const { startedAt, stats } of records.values()) {
+  for (const { startedAt, stats } of records) {
     if (!stats.isAiSession) continue;
     lifetime.sessions += 1;
     lifetime.toolCalls += stats.toolCalls;
@@ -186,7 +303,9 @@ export function getActivityStats(projectRoot: string, days: number): ActivitySta
       lifetime.toolsByName[name] = (lifetime.toolsByName[name] ?? 0) + count;
     }
 
-    const bucket = bucketIndex.get(new Date(startedAt).toISOString().slice(0, 10));
+    const bucket = bucketIndex.get(
+      new Date(startedAt).toISOString().slice(0, 10),
+    );
     if (bucket) {
       bucket.sessions += 1;
       bucket.toolCalls += stats.toolCalls;

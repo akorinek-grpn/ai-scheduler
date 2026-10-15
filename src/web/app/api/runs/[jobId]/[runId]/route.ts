@@ -14,14 +14,15 @@ function getDaemonUrl(): string | null {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ jobId: string; runId: string }> },
 ): Promise<NextResponse> {
   const { jobId, runId } = await params;
   const url = getDaemonUrl();
   if (!url) return NextResponse.json({ error: "Daemon not available" }, { status: 503 });
   try {
-    const response = await fetch(`${url}/api/runs/${encodeURIComponent(jobId)}/${encodeURIComponent(runId)}`, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+    // ?host= selects whose run it is (another Mac's comes from its mirrored data).
+    const response = await fetch(`${url}/api/runs/${encodeURIComponent(jobId)}/${encodeURIComponent(runId)}${request.nextUrl.search}`, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
     return NextResponse.json(await response.json(), { status: response.status });
   } catch {
     return NextResponse.json({ error: "Daemon not available" }, { status: 503 });

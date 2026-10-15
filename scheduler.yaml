@@ -3,11 +3,21 @@ defaults:
   timeout: 600
   max_retries: 1
   retain_runs: 30
+evaluator:
+  decision_model: benchmark
+  log_retain_months: 12
+hosts:
+  D6H4HDF0Y4:
+    role: groupon-mac-16
+  FL2R12XFMX:
+    role: groupon-mac-air
+    ssh: desk
 jobs:
   daily-ops:
     name: Daily Ops — Summary, Briefing, Actions & Compliance Refresh
     schedule: 5 9 * * 1-5
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    runs_on: groupon-mac-16
     type: script
     command: |
       FAILED=0
@@ -30,6 +40,7 @@ jobs:
     name: Afternoon Sync — Refresh Meetings (skip agents)
     schedule: 0 15 * * 1-5
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    runs_on: groupon-mac-16
     type: script
     command: |
       FAILED=0
@@ -42,11 +53,30 @@ jobs:
     tags:
       - daily
       - personalized-helper
+  connector-health:
+    name: Connector Health — notify when a data source is broken
+    schedule: 50 8 * * 1-5
+    directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    runs_on: groupon-mac-16
+    type: script
+    command: |
+      # No LLM calls. Silent and exit 0 when every connector is fine; exit 1 plus
+      # a macOS notification naming what broke, 15 min before daily-ops needs it.
+      bun run health --quiet --notify
+    timeout: 300
+    max_retries: 0
+    catchup: never
+    enabled: true
+    tags:
+      - daily
+      - personalized-helper
+      - health
   meeting-prep:
     name: Meeting Prep — 1:1 Agendas Due (morning catch-up)
     schedule: 20 9 * * 1-5
-    catchup: same-day # works on "today"/"tomorrow": a next-day catch-up would do the wrong day
+    catchup: same-day
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    runs_on: groupon-mac-16
     type: script
     command: |
       # Writes a 1:1 agenda for each direct whose usual 1:1 cadence (from the
@@ -61,8 +91,6 @@ jobs:
       RC=$?
       echo "=== Done ==="
       exit $RC
-    # The first run after the switch clears a backlog (6 directs due on
-    # 2026-09-29, ~2-4 min each); later runs touch one or two.
     timeout: 2400
     enabled: true
     tags:
@@ -72,8 +100,9 @@ jobs:
   pre-meeting-prep:
     name: Pre-Meeting Prep — 1:1 Agendas Due Tomorrow
     schedule: 0 17 * * 0-4
-    catchup: same-day # works on "today"/"tomorrow": a next-day catch-up would do the wrong day
+    catchup: same-day
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    runs_on: groupon-mac-16
     type: script
     command: |
       # The evening pass: a direct becomes due one day before their usual
@@ -97,6 +126,7 @@ jobs:
     name: Market Research Pipeline
     schedule: 0 12 * * 1,4
     directory: /Users/akorinek/Programming/market-researcher
+    runs_on: groupon-mac-16
     type: script
     command: |
       set -e
@@ -104,23 +134,17 @@ jobs:
       echo "=== Output verification ==="
       echo "Reports:" && ls -lh reports/*.{html,json} 2>/dev/null || echo "(none)"
       echo "Markfiles:" && ls -lh .data/ 2>/dev/null || echo "(none)"
-    # 1800s was tuned when every LLM call failed fast against the LiteLLM auth
-    # gate. On the Anthropic API the pipeline does real work (grounded web
-    # search + per-stage LLM analysis) and needs ~35 min end to end.
     timeout: 3600
-    enabled: true
+    enabled: false
     tags:
       - periodic
       - twice-weekly
       - market-researcher
   market-researcher-weekly-baselines:
     name: Market Researcher — Weekly Baselines (revenue + funnel + category)
-    # 10:15 Monday: the laptop is usually asleep or offline before ~09:00 (the
-    # old 06:00 slot missed 2 of 4 Mondays in Sept 2026). This runs after
-    # weekly-ops (Mon 09:30) and well before market-researcher (Mon 12:00),
-    # which reads these baseline tables.
     schedule: 15 10 * * 1
     directory: /Users/akorinek/Programming/market-researcher
+    runs_on: groupon-mac-16
     type: script
     command: |
       FAILED=0
@@ -134,7 +158,7 @@ jobs:
       sqlite3 .data/market-researcher.db "SELECT 'revenue_baselines' AS t, COUNT(*) AS rows, MAX(period_end) AS latest FROM revenue_baselines UNION ALL SELECT 'session_funnel_baselines', COUNT(*), MAX(period_end) FROM session_funnel_baselines UNION ALL SELECT 'category_funnel_baselines', COUNT(*), MAX(period_end) FROM category_funnel_baselines;"
       exit $FAILED
     timeout: 1800
-    enabled: true
+    enabled: false
     tags:
       - periodic
       - weekly
@@ -144,6 +168,7 @@ jobs:
     name: Executive Review — Daily Summary
     schedule: 45 16 * * 1-5
     directory: /Users/akorinek/Programming/ai-scheduler
+    runs_on: all
     prompt: |
       You are the executive review agent. Review today's scheduled run results and write a summary.
 
@@ -171,9 +196,12 @@ jobs:
     name: Weekly Ops — Summary, Compliance & Decisions
     schedule: 30 9 * * 1
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    runs_on: groupon-mac-16
     type: script
     command: |
       FAILED=0
+      echo "=== LLM costs (last 7 days) ==="
+      bun run llm-costs --days 7 --write || { echo "FAILED: llm-costs"; FAILED=2; }
       echo "=== Weekly summary ==="
       bun run summarize --week || { echo "FAILED: summarize"; FAILED=2; }
       echo "=== Compliance check (previous week) ==="
@@ -194,6 +222,7 @@ jobs:
     name: My 5/15 Draft — Thursday Early Safety-Net
     schedule: 0 16 * * 4
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    runs_on: groupon-mac-16
     type: script
     command: |
       echo "=== Generating Thursday 5/15 draft ==="
@@ -211,6 +240,7 @@ jobs:
     name: My 5/15 Draft — Friday Multi-Pass (11/14/17)
     schedule: 0 11,14,17 * * 5
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    runs_on: groupon-mac-16
     type: script
     command: |
       echo "=== Regenerating Friday 5/15 draft ==="
@@ -228,6 +258,7 @@ jobs:
     name: My 5/15 Draft — Monday Settled-SEO Backfill
     schedule: 45 9 * * 1
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    runs_on: groupon-mac-16
     type: script
     command: |
       # UNAGI settles SEO 3.3 revenue ~2 days after week-end, so the Thu/Fri
@@ -253,6 +284,7 @@ jobs:
     name: 5/15 Coaching Drafts - Mon Review Queue (Tue safety-net)
     schedule: 0 10 * * 1,2
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    runs_on: groupon-mac-16
     type: script
     command: |
       # Reads the directs' 5/15s and queues one draft comment per direct for
@@ -280,6 +312,7 @@ jobs:
     name: Self-Coach - Friday Check-in for /me
     schedule: 30 16 * * 5
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    runs_on: groupon-mac-16
     type: script
     command: |
       # Builds Adam's weekly ledger (commitment follow-through, coaching
@@ -302,6 +335,7 @@ jobs:
     name: Compliance Check — Fri/Sat/Sun
     schedule: 0 9,15,21 * * 5,6,0
     directory: /Users/akorinek/Programming/personalized-helper/personalized-helper
+    runs_on: groupon-mac-16
     type: script
     command: |
       echo "=== Team compliance check ==="
@@ -319,6 +353,7 @@ jobs:
     name: Skill Healer — Weekly Improvement
     schedule: 0 16 * * 5
     directory: /Users/akorinek/Programming
+    runs_on: groupon-mac-16
     prompt: |
       Process accumulated session signals and improve Claude Code skills:
       1. Read ~/.claude/self-heal/signals.jsonl for accumulated session signals
@@ -337,22 +372,22 @@ jobs:
       - meta
   babysit-prs:
     name: Babysit PRs — Auto-Review Open PRs
-    schedule: 0 6-22 * * 1-5
+    schedule: 0 * * * *
     directory: /Users/akorinek/Programming/ai-scheduler
+    runs_on: groupon-mac-air
     prompt: |
       ## FIRST, BEFORE ANYTHING ELSE: check the autopilot-daily lock
 
-      Run: `cat ~/.autopilot-daily.lock 2>/dev/null`
+      Run: `bash /Users/akorinek/Programming/autopilot-daily/scripts/lock-status.sh`
 
-      If that file exists AND its `startedAt` epoch-milliseconds value is less
-      than 120 minutes old, the autopilot-daily job is mid-run and holds the
-      machine. In that case print exactly:
+      It prints one line. If that line starts with `HELD`, the autopilot-daily
+      job is mid-run and holds the machine. In that case print exactly:
         "Deferred - autopilot-daily holds the lock"
       and STOP immediately. Do not review any PRs, do not call any other tool.
       You will run again next hour.
 
-      If the file is absent, unparseable, or older than 120 minutes, ignore it and
-      proceed normally with the review work below.
+      If it starts with `FREE`, ignore the lock and proceed normally with the
+      review work below.
 
       ## Normal review work
 
@@ -366,9 +401,12 @@ jobs:
       `converged` / `converged-static` candidate NEVER appears here - the approve-prs
       job (opus) owns it, and only that job may post APPROVE on a converged PR. While
       the skill's scheduled_mode.scope is on, every candidate carries the SEO label or
-      is a PR by the Echelon team on which my review was requested (rule D2), whatever
-      its via (config, reach, requested, label); a team PR nobody requested is skipped
-      `not-requested` and never becomes a candidate. Read its
+      is a PR by an author on the Echelon roster - the whole B2C Experience Tribe since
+      2026-10-06 - on which my review was requested (rule D2), whatever its via
+      (config, reach, requested, label); a roster PR nobody requested is skipped
+      `not-requested` and never becomes a candidate. author_in_team is true only for
+      my own team (Feature): a candidate from another B2C team carries false, and
+      that is correct. Read its
       "PREFLIGHT_CANDIDATES:" line, and take the candidates from the file named on its
       "PREFLIGHT_RESULT_FILE:" line (jq '.candidates' FILE) - never from the
       "PREFLIGHT_RESULT_JSON:" line, which the tool output truncates at ~2,000 chars:
@@ -376,7 +414,10 @@ jobs:
       - candidates EMPTY (PREFLIGHT_CANDIDATES: 0) -> print the script's decision
         lines and summary as your run output and STOP. Do NOT read SKILL.md, do NOT
         call any other tool. This is the expected outcome of most runs.
-      - candidates NON-EMPTY -> proceed to STEP 2 for exactly those PRs. Pass each
+      - candidates NON-EMPTY -> proceed to STEP 2 for exactly those PRs, one at a
+        time, in the exact order of the `.candidates` array (already sorted oldest
+        createdAt first). Never reorder by size or effort: when the run hits its
+        timeout, the oldest PRs must be the ones already reviewed. Pass each
         candidate's author_in_team to the gate exactly as the file gives it, and post
         exactly the posted_event the gate returns, whatever your verdict.
       - exit code 2 -> a host was unreachable/unauthenticated. Say WHICH host
@@ -397,6 +438,22 @@ jobs:
       (schema v2 per-PR files AND appending to the {date}-batch.json runs[]
       decision log). Repos, label filters, and cooldown come from the skill's
       config.json (scheduled_mode section).
+
+      ## Independent OpenAI reviewer (active)
+      When secondary_review.enabled is true in that config, follow
+      ~/.claude/skills/pr-review/references/openai-review.md for every substantive
+      candidate, including inline delta reviews. Run scripts/openai-review.py from
+      this supervising session with the prepared exact-HEAD checkout and independent
+      briefing as a foreground command (run_in_background: false), with shell timeout
+      (secondary_review.timeout_seconds + 60) * 1000 milliseconds. If it yields a task
+      handle, keep waiting on that handle until its terminal OPENAI_REVIEW_JSON and
+      exit; never finish the parent session or read a stale result while it runs.
+      Merge its findings before synthesis, record every disposition, and
+      pass its actual review/outcome files to every approve-gate.sh invocation.
+      A missing or failed required secondary review holds approval. If the primary
+      verdict would APPROVE, post nothing and consume no HEAD/convergence signal so
+      the next run retries. Log failures and the per-PR secondary outcome in the run
+      summary. Do not run it for empty batches, trivial deltas or over-limit PRs.
 
       ## CRITICAL: host -> username mapping (identity only; all logic lives in the skill)
       | Host | My username (self-review filter AND prior-review filter) |
@@ -421,10 +478,8 @@ jobs:
         the skill's batch-mode section, even when everything is skipped.
     model: sonnet
     skip_permissions: true
-    # 1500s killed real review batches mid-flight (comments already posted).
-    # Hourly schedule + no-overlap guard bound the cost of a long run anyway.
     timeout: 3600
-    max_retries: 0 # hourly: the next run covers a failure; immediate retries only repeat an outage
+    max_retries: 0
     enabled: true
     tags:
       - periodic
@@ -438,6 +493,7 @@ jobs:
     name: AI Researcher — Run Analysis & Improvement Proposals
     schedule: 30 15 * * 5
     directory: /Users/akorinek/Programming/ai-scheduler
+    runs_on: all
     prompt: |
       You are the AI Researcher agent for the ai-scheduler platform. Your job is to analyze
       all recent run data and propose concrete improvements to both the scheduled jobs and
@@ -446,7 +502,12 @@ jobs:
       ## Step 1 — Gather run data
 
       Read scheduler.yaml to understand all configured jobs.
-      Then scan data/runs/ for every job. For each job directory:
+      Read the evaluation ledger data/evaluations/YYYY-MM.jsonl (one JSON line per evaluated
+      run: status, duration, trigger/catch-up, execution cost, Haiku verdict, Jev decision with
+      probabilities, latency and cost, and whether the two agreed). It outlives pruned run
+      directories, so use it for every trend question: per-job success and duration over weeks,
+      follow-up rates, Haiku-vs-Jev agreement by job and severity, and Jev spend versus the
+      Haiku evaluations it could replace. Then scan data/runs/ for every job. For each job directory:
         - List all run directories (skip "latest" symlinks)
         - Read status.json and meta.json from each run
         - Read eval.json if present (contains AI evaluation of the run)
@@ -545,6 +606,7 @@ jobs:
     name: Setup Health Audit — Weekly ~/.claude Rot Check
     schedule: 0 9 * * 1
     directory: /Users/akorinek/Programming
+    runs_on: groupon-mac-16
     prompt: |
       Read ~/.claude/skills/setup-health/SKILL.md and follow it exactly, in SCHEDULED mode.
       - Run all Phase 1 deterministic checks and Phase 2 usage-based checks.
@@ -563,28 +625,25 @@ jobs:
       - health
   autopilot-daily:
     name: Autopilot Daily - Triage MBNXT and Ship One Ticket
-    schedule: 30 9 * * 1-5
+    schedule: 25 * * * *
+    catchup: never
     directory: /Users/akorinek/Programming/autopilot-daily
+    runs_on: groupon-mac-air
     type: script
     command: bash /Users/akorinek/Programming/autopilot-daily/scripts/run-daily.sh
     timeout: 7200
     max_retries: 0
     enabled: true
     tags:
-      - daily
+      - hourly
       - autopilot
   speedboat-cycle-cron:
     name: Speedboat Check-in - Daily Cycle Gate (kickoff / chase)
-    # Daily INCLUDING weekends: chase-pre can land on a Saturday (run 2's is
-    # Sat 29 Aug). The gate makes almost every run a cheap no-op; kickoff fires
-    # only while the backend still sits on the previous cycle, so a missed or
-    # failed day self-heals the next morning (go-live Gate 2.5, and
-    # docs/run-schedule.md in the repo).
     schedule: 45 8 * * *
     directory: /Users/akorinek/Programming/speedboat-checkin
+    runs_on: groupon-mac-16
     type: script
     command: bash /Users/akorinek/Programming/speedboat-checkin/scripts/cycle-cron.sh
-    # Kickoff resolves the Echelon roster and creates ~50 Asana tasks headless.
     timeout: 3600
     enabled: true
     tags:
@@ -592,8 +651,9 @@ jobs:
       - speedboat-checkin
   autopilot-reconcile:
     name: Autopilot Reconcile - Sync Ticket States With PR Outcomes
-    schedule: 15 6-22 * * 1-5
+    schedule: 15 * * * *
     directory: /Users/akorinek/Programming/autopilot-daily
+    runs_on: groupon-mac-air
     type: script
     command: bash /Users/akorinek/Programming/autopilot-daily/scripts/run-reconcile.sh
     timeout: 300
@@ -602,23 +662,36 @@ jobs:
     tags:
       - hourly
       - autopilot
-
+  autopilot-babysit:
+    name: Autopilot Babysit - Answer Reviewers and Fix CI on Pipeline PRs
+    schedule: 50 * * * *
+    directory: /Users/akorinek/Programming/autopilot-daily
+    runs_on: groupon-mac-air
+    type: script
+    command: bash /Users/akorinek/Programming/autopilot-daily/scripts/run-babysit.sh
+    timeout: 3600
+    max_retries: 0
+    catchup: never
+    enabled: true
+    tags:
+      - hourly
+      - autopilot
   answer-pr-comments:
     name: Answer PR Comments - Conversation Pass
-    schedule: 30 6-22 * * 1-5
+    schedule: 30 * * * *
     directory: /Users/akorinek/Programming/ai-scheduler
+    runs_on: groupon-mac-air
     prompt: |
       ## FIRST, BEFORE ANYTHING ELSE: check the autopilot-daily lock
 
-      Run: `cat ~/.autopilot-daily.lock 2>/dev/null`
+      Run: `bash /Users/akorinek/Programming/autopilot-daily/scripts/lock-status.sh`
 
-      If that file exists AND its `startedAt` epoch-milliseconds value is less
-      than 120 minutes old, the autopilot-daily job is mid-run and holds the
-      machine. In that case print exactly:
+      It prints one line. If that line starts with `HELD`, the autopilot-daily
+      job is mid-run and holds the machine. In that case print exactly:
         "Deferred - autopilot-daily holds the lock"
       and STOP immediately. Do not call any other tool. You will run again next hour.
 
-      If the file is absent, unparseable, or older than 120 minutes, proceed.
+      If it starts with `FREE`, proceed.
 
       ## Conversation pass
 
@@ -644,9 +717,10 @@ jobs:
       - exit code 2 -> a host was unreachable. Name WHICH host in your summary,
         then continue with whatever items were emitted.
       - a SCOPE_STATUS line other than ok / refreshed -> say so in your summary.
-        While the scope is on, only PRs carrying the SEO label, Echelon-team PRs
-        where my review was requested, and team PRs that mention me are scanned;
-        that is expected, not an error.
+        While the scope is on, only PRs carrying the SEO label, PRs by the Echelon
+        roster (the whole B2C Experience Tribe since 2026-10-06) where my review
+        was requested, and roster PRs that mention me are scanned; that is
+        expected, not an error.
 
       This job answers people. It posts thread replies, thread resolutions with a
       recorded basis, and at most one review dismissal per PR. It NEVER reviews
@@ -661,30 +735,29 @@ jobs:
     model: sonnet
     skip_permissions: true
     timeout: 1800
-    max_retries: 0 # hourly: the next run covers a failure; immediate retries only repeat an outage
+    max_retries: 0
     enabled: true
     tags:
       - hourly
       - pr-review
-
   approve-prs:
-    name: Approve PRs — Converged Re-Reviews (opus)
-    schedule: 40 6-22 * * 1-5
+    name: Approve PRs — Converged Re-Reviews
+    schedule: 40 * * * *
     directory: /Users/akorinek/Programming/ai-scheduler
+    runs_on: groupon-mac-air
     prompt: |
       ## FIRST, BEFORE ANYTHING ELSE: check the autopilot-daily lock
 
-      Run: `cat ~/.autopilot-daily.lock 2>/dev/null`
+      Run: `bash /Users/akorinek/Programming/autopilot-daily/scripts/lock-status.sh`
 
-      If that file exists AND its `startedAt` epoch-milliseconds value is less
-      than 120 minutes old, the autopilot-daily job is mid-run and holds the
-      machine. In that case print exactly:
+      It prints one line. If that line starts with `HELD`, the autopilot-daily
+      job is mid-run and holds the machine. In that case print exactly:
         "Deferred - autopilot-daily holds the lock"
       and STOP immediately. Do not review any PRs, do not call any other tool.
       You will run again next hour.
 
-      If the file is absent, unparseable, or older than 120 minutes, ignore it and
-      proceed normally with the review work below.
+      If it starts with `FREE`, ignore the lock and proceed normally with the
+      review work below.
 
       ## What this job is
 
@@ -692,8 +765,9 @@ jobs:
       it: pull requests where every blocking finding this reviewer raised was
       resolved by this reviewer on code evidence. Every other reason belongs to
       babysit-prs. This is the ONLY job that may post APPROVE on a converged PR,
-      and it runs on opus for that reason: sonnet may find, only opus may approve.
-      It runs at :40, ten minutes after the :30 conversation pass that creates
+      It runs on sonnet since 2026-09-30 (user decision: the opus session cost
+      about $7-10 per run; approval is gated by scripts/approve-gate.sh, not by
+      the model). It runs at :40, ten minutes after the :30 conversation pass that creates
       convergence.
 
       STEP 1 - run the deterministic preflight gate. Your FIRST action is:
@@ -710,7 +784,9 @@ jobs:
       - candidates EMPTY (PREFLIGHT_CANDIDATES: 0) -> print the script's decision
         lines and summary as your run output and STOP. Do NOT read SKILL.md, do NOT
         call any other tool. This is the expected outcome of most runs.
-      - candidates NON-EMPTY -> proceed to STEP 2 for exactly those PRs. Pass each
+      - candidates NON-EMPTY -> proceed to STEP 2 for exactly those PRs, one at a
+        time, in the exact order of the `.candidates` array (already sorted oldest
+        createdAt first). Never reorder by size or effort. Pass each
         candidate's author_in_team to the gate exactly as the file gives it.
       - exit code 2 -> a host was unreachable/unauthenticated. Say WHICH host
         prominently in your summary (this must never look like "no PRs found"),
@@ -734,6 +810,21 @@ jobs:
       per-PR files with `job: "approve-prs"`, AND appending to the
       {date}-batch.json runs[] decision log).
 
+      ## Independent OpenAI reviewer (active)
+      When secondary_review.enabled is true, also follow
+      ~/.claude/skills/pr-review/references/openai-review.md, including the
+      converged-static verdict-only path. Run the reviewer in the foreground with
+      shell timeout (secondary_review.timeout_seconds + 60) * 1000 milliseconds. If
+      the runtime yields a task handle, await its terminal summary/exit before
+      finishing this parent session; status running is pending, never a failed result.
+      OpenAI findings must reach synthesis and
+      every raw finding must receive a logged disposition. Pass the actual review
+      and outcome files to approve-gate.sh; it holds approval when either is missing,
+      failed, stale or incomplete. On a secondary failure when the primary verdict
+      would APPROVE, post nothing and consume no HEAD/convergence signal so this job
+      retries next hour. End each PR's summary with secondary status, findings kept
+      and dropped, and its outcome artifact path. Empty batches still STOP immediately.
+
       ## CRITICAL: host -> username mapping (identity only; all logic lives in the skill)
       | Host | My username (self-review filter AND prior-review filter) |
       |---|---|
@@ -755,14 +846,54 @@ jobs:
       - If there are no candidates, report "No converged PRs to approve".
       - ALWAYS print the per-PR decision lines and the batch summary table from
         the skill's batch-mode section, even when everything is skipped.
-    model: opus
+    model: sonnet
     skip_permissions: true
-    # Same envelope as babysit-prs: a converged re-review dispatches five specialists
-    # plus the architect. Hourly schedule + no-overlap guard bound a long run.
     timeout: 3600
-    max_retries: 0 # hourly: the next run covers a failure; immediate retries only repeat an outage
+    max_retries: 0
     enabled: true
     tags:
       - hourly
       - pr-review
       - approve
+  janitor-processes:
+    name: Janitor - Leftover Dev and MCP Processes (report-only)
+    schedule: 45 10,13,15 * * 1-5
+    directory: /Users/akorinek/Programming/ai-scheduler
+    runs_on: all
+    type: script
+    command: npm run -s janitor -- --processes
+    timeout: 300
+    max_retries: 0
+    catchup: never
+    enabled: true
+    tags:
+      - maintenance
+      - janitor
+  janitor-disk:
+    name: Janitor - Cache Cleanup (report-only)
+    schedule: 20 12 * * 1-5
+    directory: /Users/akorinek/Programming/ai-scheduler
+    runs_on: all
+    type: script
+    command: npm run -s janitor -- --disk
+    timeout: 1800
+    max_retries: 0
+    catchup: never
+    enabled: true
+    tags:
+      - maintenance
+      - janitor
+  desk-activity-pull:
+    name: Pull desk activity
+    schedule: 50 * * * *
+    directory: /Users/akorinek/Programming/docs/desk-host
+    runs_on: groupon-mac-16
+    type: script
+    command: bash /Users/akorinek/Programming/docs/desk-host/laptop-pull-desk-activity.sh
+    timeout: 1200
+    max_retries: 0
+    catchup: never
+    enabled: true
+    tags:
+      - maintenance
+      - desk

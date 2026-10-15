@@ -11,6 +11,7 @@ import {
   Cell,
 } from "recharts";
 import type { RunResponse, JobResponse } from "@/lib/api-client";
+import { HostBadge } from "./host-view";
 
 interface DashboardChartsProps {
   runs: RunResponse[];
@@ -152,7 +153,8 @@ function JobHeatmap({ runs, jobs }: { runs: RunResponse[]; jobs: JobResponse[] }
   const grid = useMemo(() => {
     const enabledJobs = jobs.filter((j) => j.enabled);
     return enabledJobs.map((job) => {
-      const jobRuns = runs.filter((r) => r.jobId === job.id);
+      // With both Macs on screen a job that runs on each appears once per host.
+      const jobRuns = runs.filter((r) => r.jobId === job.id && (!job.host || !r.host || r.host === job.host));
       const cells: HeatmapCell[] = days.map(({ date }) => {
         const dayRuns = jobRuns.filter((r) => new Date(r.startedAt).toISOString().slice(0, 10) === date);
         if (dayRuns.length === 0) return { status: "none", count: 0 };
@@ -193,9 +195,10 @@ function JobHeatmap({ runs, jobs }: { runs: RunResponse[]; jobs: JobResponse[] }
 
         {/* Job rows */}
         {grid.map(({ job, cells }) => (
-          <div key={job.id} className="flex items-center gap-1 mb-0.5">
-            <div className="w-[140px] shrink-0 text-[12px] truncate text-foreground" title={job.name}>
-              {job.name}
+          <div key={`${job.host ?? ""}/${job.id}`} className="flex items-center gap-1 mb-0.5">
+            <div className="w-[140px] shrink-0 flex items-center gap-1 text-[12px] text-foreground" title={job.name}>
+              <span className="min-w-0 truncate">{job.name}</span>
+              <HostBadge name={job.host} compact />
             </div>
             {cells.map((cell, i) => (
               <div
