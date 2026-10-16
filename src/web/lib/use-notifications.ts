@@ -8,7 +8,7 @@ export interface Toast {
   id: string;
   title: string;
   body: string;
-  status: "started" | "success" | "partial" | "failed" | "timeout";
+  status: "started" | "success" | "partial" | "failed" | "timeout" | "deferred" | "blocked" | "killed";
   timestamp: number;
 }
 
@@ -70,10 +70,12 @@ export function useNotifications(): UseNotificationsResult {
       : status === "partial" ? "completed with failures"
         : status === "failed" ? "failed"
           : status === "timeout" ? "timed out"
-            : "finished";
-    const toastStatus = (status === "success" || status === "partial" || status === "failed" || status === "timeout")
-      ? status as Toast["status"]
-      : "success";
+            : status === "deferred" ? "was deferred (precondition)"
+              : status === "blocked" ? "is blocked, waiting on a person"
+                : status === "killed" ? "was killed"
+                  : "finished";
+    const finished: readonly string[] = ["success", "partial", "failed", "timeout", "deferred", "blocked", "killed"];
+    const toastStatus = finished.includes(status) ? (status as Toast["status"]) : "success";
 
     addToast("Job Finished", `${jobName} ${statusLabel}`, toastStatus);
 

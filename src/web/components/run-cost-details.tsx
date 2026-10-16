@@ -305,14 +305,19 @@ export function RunCostDetails({
                   </span>
                   <CostValue
                     value={
-                      attempt.entries.length
+                      attempt.entries.some((entry) => entry.costUsd !== null)
                         ? attempt.entries.reduce(
-                            (sum, entry) => sum + entry.costUsd,
+                            (sum, entry) => sum + (entry.costUsd ?? 0),
                             0,
                           )
                         : null
                     }
-                    coverage={attempt.complete ? "complete" : "partial"}
+                    coverage={
+                      attempt.complete &&
+                      attempt.entries.every((entry) => entry.costUsd !== null)
+                        ? "complete"
+                        : "partial"
+                    }
                   />
                 </h3>
                 {attempt.entries.length ? (

@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "jev:report": "tsx scripts/jev-report.ts",
+    "jev:replay": "./scripts/with-env.sh tsx scripts/jev-replay.ts",
     "janitor": "tsx scripts/janitor.ts"
   },
   "dependencies": {

@@ -4,7 +4,9 @@ defaults:
   max_retries: 1
   retain_runs: 30
 evaluator:
-  decision_model: benchmark
+  # enforce since 2026-10-15 (Adam): Jev flagged 100% of 72 hard failures in benchmark; Haiku only
+  # summarises flagged runs and gives a second opinion in the 0.55-0.65 band. See AGENTS.md Evaluator.
+  decision_model: enforce
   log_retain_months: 12
 hosts:
   D6H4HDF0Y4:
@@ -91,7 +93,7 @@ jobs:
       RC=$?
       echo "=== Done ==="
       exit $RC
-    timeout: 2400
+    timeout: 420
     enabled: true
     tags:
       - daily
@@ -116,7 +118,7 @@ jobs:
       echo "=== Done ==="
       exit $RC
     timeout: 2400
-    enabled: true
+    enabled: false
     tags:
       - daily
       - personalized-helper
@@ -168,7 +170,7 @@ jobs:
     name: Executive Review — Daily Summary
     schedule: 45 16 * * 1-5
     directory: /Users/akorinek/Programming/ai-scheduler
-    runs_on: all
+    runs_on: groupon-mac-16
     prompt: |
       You are the executive review agent. Review today's scheduled run results and write a summary.
 
@@ -344,6 +346,7 @@ jobs:
       echo "=== Done ==="
       exit $RC
     timeout: 900
+    catchup: never
     enabled: true
     tags:
       - weekly
@@ -365,30 +368,20 @@ jobs:
     model: sonnet
     skip_permissions: true
     timeout: 600
-    enabled: true
+    enabled: false
     tags:
       - weekly
       - skills
       - meta
   babysit-prs:
-    name: Babysit PRs — Auto-Review Open PRs
+    name: Review round — first reviews and re-reviews of the tribe's PRs
     schedule: 0 * * * *
     directory: /Users/akorinek/Programming/ai-scheduler
     runs_on: groupon-mac-air
+    # Exit 75 while autopilot-daily or a babysit session holds the Air: the run is deferred and
+    # retried in 10 min (twice), no Sonnet session starts (plan 2, 2026-10-16).
+    precondition: bash /Users/akorinek/Programming/ai-scheduler/scripts/precondition-autopilot-lock.sh
     prompt: |
-      ## FIRST, BEFORE ANYTHING ELSE: check the autopilot-daily lock
-
-      Run: `bash /Users/akorinek/Programming/autopilot-daily/scripts/lock-status.sh`
-
-      It prints one line. If that line starts with `HELD`, the autopilot-daily
-      job is mid-run and holds the machine. In that case print exactly:
-        "Deferred - autopilot-daily holds the lock"
-      and STOP immediately. Do not review any PRs, do not call any other tool.
-      You will run again next hour.
-
-      If it starts with `FREE`, ignore the lock and proceed normally with the
-      review work below.
-
       ## Normal review work
 
       STEP 1 - run the deterministic preflight gate. Your FIRST action is:
@@ -478,8 +471,13 @@ jobs:
         the skill's batch-mode section, even when everything is skipped.
     model: sonnet
     skip_permissions: true
-    timeout: 3600
+    # 60 s under the hourly interval: a run killed at 3600 s was still being torn down when the
+    # next tick fired, which the daemon skipped as "still active" and catchup: never dropped
+    # (13:00Z on 2026-10-16). The lost tail of a timed-out round is p50 3.9 min, so the last
+    # minute never completes a PR anyway.
+    timeout: 3540
     max_retries: 0
+    catchup: never
     enabled: true
     tags:
       - periodic
@@ -493,7 +491,7 @@ jobs:
     name: AI Researcher — Run Analysis & Improvement Proposals
     schedule: 30 15 * * 5
     directory: /Users/akorinek/Programming/ai-scheduler
-    runs_on: all
+    runs_on: groupon-mac-16
     prompt: |
       You are the AI Researcher agent for the ai-scheduler platform. Your job is to analyze
       all recent run data and propose concrete improvements to both the scheduled jobs and
@@ -618,19 +616,31 @@ jobs:
     model: sonnet
     skip_permissions: true
     timeout: 600
-    enabled: true
+    enabled: false
     tags:
       - weekly
       - meta
       - health
   autopilot-daily:
-    name: Autopilot Daily - Triage MBNXT and Ship One Ticket
+    name: Autopilot — triage MBNXT and start a ticket (up to three in flight, one at a time)
     schedule: 25 * * * *
     catchup: never
     directory: /Users/akorinek/Programming/autopilot-daily
     runs_on: groupon-mac-air
+    # The flow is phased so it never overflows the Air: exit 75 (deferred, retried in 10 min) while
+    # the lock is held, memory is below 20% free, or another job's build/test still runs.
+    precondition: bash /Users/akorinek/Programming/ai-scheduler/scripts/precondition-air-load.sh
+    # Exit 30 = the run handed its work to a person (a PR that needs its author, a ticket the
+    # flow handed back): `blocked`, amber, not a failure, not retried.
+    outcome_codes: { blocked: [30] }
     type: script
+    # Starts its own Claude session (stage 2): held with the claude-type jobs while the account's
+    # usage window is exhausted (the usage hold, 2026-10-16).
+    uses_claude: true
     command: bash /Users/akorinek/Programming/autopilot-daily/scripts/run-daily.sh
+    # Kept above the hourly interval on purpose: a run is one ticket's implementation and may
+    # span two ticks; the tick it overlaps is skipped and dropped (catchup: never), which is the
+    # intended cadence, not a lost round.
     timeout: 7200
     max_retries: 0
     enabled: true
@@ -644,7 +654,7 @@ jobs:
     runs_on: groupon-mac-16
     type: script
     command: bash /Users/akorinek/Programming/speedboat-checkin/scripts/cycle-cron.sh
-    timeout: 3600
+    timeout: 120
     enabled: true
     tags:
       - daily
@@ -658,18 +668,30 @@ jobs:
     command: bash /Users/akorinek/Programming/autopilot-daily/scripts/run-reconcile.sh
     timeout: 300
     max_retries: 0
+    catchup: never
     enabled: true
     tags:
       - hourly
       - autopilot
   autopilot-babysit:
-    name: Autopilot Babysit - Answer Reviewers and Fix CI on Pipeline PRs
+    name: "Autopilot — babysit our pipeline PRs: answer reviewers, fix CI, carry to merge"
     schedule: 50 * * * *
     directory: /Users/akorinek/Programming/autopilot-daily
     runs_on: groupon-mac-air
+    # The flow is phased so it never overflows the Air: exit 75 (deferred, retried in 10 min) while
+    # the lock is held, memory is below 20% free, or another job's build/test still runs.
+    precondition: bash /Users/akorinek/Programming/ai-scheduler/scripts/precondition-air-load.sh
+    # Exit 30 = the run handed its work to a person (a PR that needs its author, a ticket the
+    # flow handed back): `blocked`, amber, not a failure, not retried.
+    outcome_codes: { blocked: [30] }
     type: script
+    # Starts its own Claude session (/pr-fixup): held with the claude-type jobs while the account's
+    # usage window is exhausted (the usage hold, 2026-10-16).
+    uses_claude: true
     command: bash /Users/akorinek/Programming/autopilot-daily/scripts/run-babysit.sh
-    timeout: 3600
+    # 60 s under the hourly interval, so a timeout's teardown never makes the next tick skip
+    # (see babysit-prs).
+    timeout: 3540
     max_retries: 0
     catchup: never
     enabled: true
@@ -677,22 +699,14 @@ jobs:
       - hourly
       - autopilot
   answer-pr-comments:
-    name: Answer PR Comments - Conversation Pass
+    name: Review round — answer comments on our reviews
     schedule: 30 * * * *
     directory: /Users/akorinek/Programming/ai-scheduler
     runs_on: groupon-mac-air
+    # Exit 75 while autopilot-daily or a babysit session holds the Air: the run is deferred and
+    # retried in 10 min (twice), no Sonnet session starts (plan 2, 2026-10-16).
+    precondition: bash /Users/akorinek/Programming/ai-scheduler/scripts/precondition-autopilot-lock.sh
     prompt: |
-      ## FIRST, BEFORE ANYTHING ELSE: check the autopilot-daily lock
-
-      Run: `bash /Users/akorinek/Programming/autopilot-daily/scripts/lock-status.sh`
-
-      It prints one line. If that line starts with `HELD`, the autopilot-daily
-      job is mid-run and holds the machine. In that case print exactly:
-        "Deferred - autopilot-daily holds the lock"
-      and STOP immediately. Do not call any other tool. You will run again next hour.
-
-      If it starts with `FREE`, proceed.
-
       ## Conversation pass
 
       Run EXACTLY this, with NO arguments. It is batch-scoped across every
@@ -734,31 +748,24 @@ jobs:
       | github.groupondev.com | akorinek |
     model: sonnet
     skip_permissions: true
-    timeout: 1800
+    # 60 s under the half-hour interval, so a timeout's teardown never makes the next tick skip
+    # (see babysit-prs).
+    timeout: 1740
     max_retries: 0
+    catchup: never
     enabled: true
     tags:
       - hourly
       - pr-review
   approve-prs:
-    name: Approve PRs — Converged Re-Reviews
+    name: Review round — approve converged PRs
     schedule: 40 * * * *
     directory: /Users/akorinek/Programming/ai-scheduler
     runs_on: groupon-mac-air
+    # Exit 75 while autopilot-daily or a babysit session holds the Air: the run is deferred and
+    # retried in 10 min (twice), no Sonnet session starts (plan 2, 2026-10-16).
+    precondition: bash /Users/akorinek/Programming/ai-scheduler/scripts/precondition-autopilot-lock.sh
     prompt: |
-      ## FIRST, BEFORE ANYTHING ELSE: check the autopilot-daily lock
-
-      Run: `bash /Users/akorinek/Programming/autopilot-daily/scripts/lock-status.sh`
-
-      It prints one line. If that line starts with `HELD`, the autopilot-daily
-      job is mid-run and holds the machine. In that case print exactly:
-        "Deferred - autopilot-daily holds the lock"
-      and STOP immediately. Do not review any PRs, do not call any other tool.
-      You will run again next hour.
-
-      If it starts with `FREE`, ignore the lock and proceed normally with the
-      review work below.
-
       ## What this job is
 
       The approving job. Only `converged` and `converged-static` candidates reach
@@ -846,15 +853,37 @@ jobs:
       - If there are no candidates, report "No converged PRs to approve".
       - ALWAYS print the per-PR decision lines and the batch summary table from
         the skill's batch-mode section, even when everything is skipped.
-    model: sonnet
+    model: opus
     skip_permissions: true
-    timeout: 3600
+    # 60 s under the hourly interval, so a timeout's teardown never makes the next tick skip
+    # (11:40Z on 2026-10-16 after the 10:40 timeout; see babysit-prs).
+    timeout: 3540
     max_retries: 0
+    catchup: never
     enabled: true
     tags:
       - hourly
       - pr-review
       - approve
+  nightly-tests:
+    # Every suite the scheduled jobs depend on (pr-review scripts, ai-scheduler, autopilot-daily),
+    # once a night on the Air; these repos have no CI. Fails when any suite fails (2026-10-15).
+    name: Nightly Tests - pr-review, ai-scheduler, autopilot-daily
+    schedule: 30 2 * * *
+    directory: /Users/akorinek/Programming/ai-scheduler
+    runs_on: groupon-mac-air
+    type: script
+    command: ./scripts/nightly-tests.sh
+    # normal, not background: the Codex runner tests give a fake CLI 1 s to start, which failed
+    # 4 of 5 times at background priority (2026-10-15) and 0 of 8 at normal on a quiet Mac.
+    priority: normal
+    timeout: 1800
+    max_retries: 0
+    catchup: same-day
+    enabled: true
+    tags:
+      - maintenance
+      - tests
   janitor-processes:
     name: Janitor - Leftover Dev and MCP Processes (report-only)
     schedule: 45 10,13,15 * * 1-5
@@ -897,3 +926,40 @@ jobs:
     tags:
       - maintenance
       - desk
+  pr-discovery:
+    name: Review rounds — PR discovery (candidates file for the hourly review jobs)
+    schedule: 20,50 * * * *
+    directory: /Users/akorinek/Programming/ai-scheduler
+    runs_on: groupon-mac-air
+    type: script
+    # Discovery used to run inside each review job's Claude session (292 s at best, unbounded on
+    # a slow GHE; the 14:00Z run on 2026-10-15 reviewed nothing). It now runs here twice an hour
+    # and writes candidates-<role>.json; babysit-prs and approve-prs read the newest file when it
+    # is under 40 minutes old and run the preflight themselves otherwise (plan 1, 2026-10-16).
+    command: bash /Users/akorinek/.claude/skills/pr-review/scripts/batch-preflight.sh --role all --out "$HOME/.claude/cache/pr-review-telemetry/discovery"
+    timeout: 900
+    max_retries: 0
+    catchup: never
+    enabled: true
+    tags:
+      - hourly
+      - pr-review
+  usage-headroom:
+    name: Claude usage window — headroom sample (report-only)
+    schedule: "*/30 * * * *"
+    directory: /Users/akorinek/Programming/ai-scheduler
+    runs_on: all
+    type: script
+    # Samples the account's usage windows (the figures Claude Code's /usage shows) into
+    # data/usage/latest.json and headroom.jsonl for the dashboard card (GET /api/usage).
+    # Report-only: nothing is throttled by it yet; thresholds come from a week of samples
+    # (2026-10-16). The token is read from the login keychain, so the job needs the GUI session
+    # the LaunchAgent runs in. Any failure is a sample with status "unavailable", exit 0.
+    command: python3 scripts/usage-headroom.py
+    timeout: 60
+    max_retries: 0
+    catchup: never
+    enabled: true
+    tags:
+      - periodic
+      - health

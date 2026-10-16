@@ -1,7 +1,22 @@
 import type { RunCostSummary } from "./cost-types";
 
+/**
+ * success: exit 0. partial: exit 2. failed: any other exit code, or the precondition failed.
+ * timeout: killed at the job's `timeout`. deferred (2026-10-16): the job's `precondition`
+ * exited 75, no command or Claude session ran, the slot is retried after `retry_after`.
+ * blocked: the command exited with a code the job lists under `outcome_codes.blocked`
+ * (waiting on a person; no retry). killed: the process ended without an exit code (the
+ * daemon stopped, SIGKILL), recorded as failed with exit=None until 2026-10-16.
+ */
 export type RunStatus =
-  "running" | "success" | "partial" | "failed" | "timeout";
+  | "running"
+  | "success"
+  | "partial"
+  | "failed"
+  | "timeout"
+  | "deferred"
+  | "blocked"
+  | "killed";
 export type TriggerType = "scheduled" | "manual" | "catchup";
 /** scheduler.yaml `catchup`: which missed slots get a catch-up run. Unset means "always". */
 export type CatchupPolicy = "always" | "same-day" | "never";
@@ -29,7 +44,60 @@ export interface JobConfig {
   tags: string[];
   /** Role name(s) from `hosts`, or "all". Required once `hosts` is declared. */
   runs_on?: string | string[];
+  /**
+   * Shell command run in the job's directory before the job is spawned, with the job's env.
+   * Exit 0 runs the job; exit 75 (EX_TEMPFAIL) records the run as `deferred` without starting
+   * the command or Claude session; anything else records `failed` with the output in output.log.
+   */
+  precondition?: string;
+  /** Seconds the precondition may take before it counts as failed. Default 60. */
+  precondition_timeout?: number;
+  /** Seconds after a deferred run before the slot is retried (at most 2 retries). Default 600. */
+  retry_after?: number;
+  /** Exit codes with a meaning of their own: `blocked` = waiting on a person. */
+  outcome_codes?: { blocked?: number[] };
+  /**
+   * A script job that starts a Claude session itself (autopilot's `claude -p`). Held with the
+   * claude-type jobs while the account's usage window is exhausted (see UsageHold). Default false.
+   */
+  uses_claude?: boolean;
 }
+
+/**
+ * The account's usage limit, as a run's output reported it (usage-limit.ts): the 7-day
+ * ("weekly") or 5-hour ("session") window, the reset instant when the text named one the
+ * parser understood, the zone in the text, and the line itself.
+ */
+export interface UsageLimitHit {
+  kind: "weekly" | "session";
+  resetsAt: string | null;
+  zone: string | null;
+  text: string;
+}
+
+/**
+ * The hold the daemon keeps after a run hit the usage limit (data/usage-hold.json): no job that
+ * starts a Claude session (claude-type, or script with `uses_claude`) starts before `until`.
+ * Skipped ticks are counted, logged once each, and queued as catch-ups under the job's policy.
+ */
+export interface UsageHold {
+  version: 1;
+  kind: UsageLimitHit["kind"];
+  /** ISO instant the hold ends: the reset plus a minute, or 30 min after the hit when unknown. */
+  until: string;
+  /** ISO instant the hold started (the run that hit the limit finished). */
+  since: string;
+  /** The limit line, verbatim. */
+  text: string;
+  /** Ticks of held jobs skipped so far. */
+  skipped: number;
+  jobId: string | null;
+  runId: string | null;
+}
+
+/** Deferred runs: retries per slot and the delay before each (see RunStatus). */
+export const DEFERRED_RETRY = { maxRetries: 2, retryAfterSec: 600 } as const;
+export const PRECONDITION_TIMEOUT_SEC = 60;
 
 /** The machine a daemon resolved from `hosts` at config load (see config-schema.ts). */
 export interface HostInfo {
@@ -129,6 +197,10 @@ export interface RunMeta {
   catchupFor?: string;
   /** Host that ran it (its resolved host name, as in `hosts`); absent on runs from before 2026-10-15. */
   host?: string;
+  /** The cron slot this run stands for (ISO); a deferred run's retry carries the same slot. */
+  slot?: string;
+  /** 1 or 2 when this run is a retry of a deferred run of the same slot. */
+  deferredRetry?: number;
 }
 
 export interface RunStatusFile {
@@ -136,6 +208,10 @@ export interface RunStatusFile {
   exitCode: number | null;
   startedAt: string;
   finishedAt: string | null;
+  /** On a `blocked` run: why. `usage-limit` = the account's usage window is exhausted (2026-10-16). Absent for `outcome_codes.blocked` exits. */
+  blockedReason?: "usage-limit";
+  /** The limit line and its reset, when blockedReason is `usage-limit`. */
+  usageLimit?: UsageLimitHit;
 }
 
 export interface DaemonHealth {
@@ -147,6 +223,10 @@ export interface DaemonHealth {
   activeJobs: string[];
   /** Present when scheduler.yaml declares `hosts`. */
   host?: HostInfo;
+  /** True after POST /api/drain: no new runs start; the daemon exits once activeJobs is empty. */
+  draining?: boolean;
+  /** Present while the account's usage window is exhausted: Claude jobs are held until `until`. */
+  usageHold?: UsageHold | null;
 }
 
 export type EvalSeverity = "ok" | "info" | "warning" | "critical";
@@ -157,9 +237,14 @@ export interface RunEvaluation {
   followUpNeeded: boolean;
   followUpReason: string | null;
   evaluatedAt: string;
-  /** Who produced severity/followUp: Haiku, Jev, or Jev with a Haiku-written summary. Absent on older runs. */
-  source?: "haiku" | "jev" | "jev+haiku";
-  /** Enforce mode: Haiku's own verdict, asked for when Jev's P(follow-up) was in the uncertain band. */
+  /**
+   * Who produced severity/followUp: Haiku, Jev, Jev with a Claude-written summary ("jev+haiku":
+   * Haiku for a warning/critical/follow-up summary, Sonnet for a second opinion in the uncertain
+   * band since 2026-10-16; the model is in the ledger's haikuModel), or the scheduler itself for a
+   * deferred run (no model call). Absent on older runs.
+   */
+  source?: "haiku" | "jev" | "jev+haiku" | "scheduler";
+  /** Enforce mode: the second opinion (Sonnet since 2026-10-16) asked for when Jev's P(follow-up) was in the uncertain band. */
   secondOpinion?: { severity: EvalSeverity; followUpNeeded: boolean };
   /** Benchmark mode: Haiku's own verdict on the run, recorded beside Jev's as a comparison baseline. */
   haikuBenchmark?: { severity: EvalSeverity; followUpNeeded: boolean };
@@ -255,6 +340,10 @@ export interface CatchupQueueEntry {
   jobName: string;
   missedSlot: string;
   enqueuedAt: string;
+  /** "retry": the slot's run was deferred by its precondition and runs again at notBefore. */
+  kind?: "catchup" | "retry";
+  notBefore?: string;
+  retry?: number;
 }
 
 export interface CatchupQueueInFlight {

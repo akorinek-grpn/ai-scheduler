@@ -361,9 +361,9 @@ export default function JobsPage(): React.ReactElement {
                             className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium border ${
                               lastRun.status === "success"
                                 ? "border-green-500/30 bg-green-500/10 text-green-500"
-                                : lastRun.status === "partial"
+                                : lastRun.status === "partial" || lastRun.status === "blocked"
                                   ? "border-amber-500/30 bg-amber-500/10 text-amber-500"
-                                  : lastRun.status === "failed"
+                                  : lastRun.status === "failed" || lastRun.status === "killed"
                                     ? "border-red-500/30 bg-red-500/10 text-red-500"
                                     : lastRun.status === "timeout"
                                       ? "border-orange-500/30 bg-orange-500/10 text-orange-500"
@@ -373,9 +373,10 @@ export default function JobsPage(): React.ReactElement {
                             }`}
                           >
                             {lastRun.status === "success" && "\u2713"}
-                            {lastRun.status === "partial" && "\u26A0"}
-                            {lastRun.status === "failed" && "\u2717"}
+                            {(lastRun.status === "partial" || lastRun.status === "blocked") && "\u26A0"}
+                            {(lastRun.status === "failed" || lastRun.status === "killed") && "\u2717"}
                             {lastRun.status === "timeout" && "\u23F1"}
+                            {lastRun.status === "deferred" && "\u23F8"}
                             {lastRun.status === "running" && (
                               <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-yellow-500" />
                             )}

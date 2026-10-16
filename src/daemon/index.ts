@@ -59,10 +59,18 @@ function startHeartbeat(
       lastHeartbeat: new Date().toISOString(),
       activeJobs: engine.getActiveJobIds(),
       ...(host ? { host } : {}),
+      ...(engine.isDraining() ? { draining: true } : {}),
+      ...(engine.getUsageHold() ? { usageHold: engine.getUsageHold() } : {}),
     };
     fs.writeFileSync(daemonJsonPath, JSON.stringify(health, null, 2));
   }, 30_000);
 }
+
+/**
+ * Exit code after a drain. The LaunchAgent (docs/desk-host/launchd) has KeepAlive
+ * SuccessfulExit=false: a clean exit would stop the daemon for good, this one brings it back.
+ */
+export const DRAIN_EXIT_CODE = 75;
 
 function watchConfig(engine: CronEngine): void {
   let debounceTimer: NodeJS.Timeout | null = null;
@@ -121,10 +129,12 @@ function cleanupOrphanedRuns(projectRoot: string): void {
           fs.readFileSync(statusPath, "utf-8"),
         );
         if (status.status === "running") {
+          // The run's process died with the previous daemon (or outlived it without a
+          // record): no exit code, so `killed`, not `failed` (2026-10-16).
           discardProvisionalRunStats(projectRoot, jobId, runId);
           const updated: RunStatusFile = {
             ...status,
-            status: "failed",
+            status: "killed",
             finishedAt: new Date().toISOString(),
           };
           fs.writeFileSync(statusPath, JSON.stringify(updated, null, 2));
@@ -219,8 +229,8 @@ async function main(): Promise<void> {
     getConfig: () => engine.getCurrentConfig(),
   });
 
-  const shutdown = () => {
-    console.log("\n[daemon] Shutting down...");
+  const shutdown = (exitCode = 0) => {
+    console.log(`\n[daemon] Shutting down${exitCode === DRAIN_EXIT_CODE ? " (drained; launchd restarts it)" : ""}...`);
     engine.stopAll();
     clearInterval(heartbeatInterval);
     catchup.stop();
@@ -234,11 +244,18 @@ async function main(): Promise<void> {
       /* noop */
     }
 
-    process.exit(0);
+    process.exit(exitCode);
   };
 
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
+  // POST /api/drain: once the last run has finished, exit so launchd starts a fresh daemon
+  // (the new code after a deploy). Its startup sweep catches up slots missed meanwhile.
+  engine.onDrained(() => {
+    console.log("[daemon] Drained: no run in progress, exiting for launchd to restart");
+    shutdown(DRAIN_EXIT_CODE);
+  });
+
+  process.on("SIGTERM", () => shutdown());
+  process.on("SIGINT", () => shutdown());
 }
 
 main();

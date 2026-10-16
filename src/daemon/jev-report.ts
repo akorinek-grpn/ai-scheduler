@@ -14,6 +14,7 @@
  * live here.
  */
 import type { EvalSeverity, EvaluationLogRecord } from "@shared/types";
+import { FOLLOW_UP_THRESHOLD } from "./decision";
 import { SECOND_OPINION_BAND } from "./evaluator";
 
 export interface ReadinessThresholds {
@@ -203,7 +204,8 @@ export function analyzeLedger(
     compared += 1;
     job.compared += 1;
     const jevSeverity = decision.severity as EvalSeverity;
-    const jevFollowUp = (decision.followUpProbability as number) >= 0.5;
+    const jevFollowUp =
+      (decision.followUpProbability as number) >= FOLLOW_UP_THRESHOLD;
     const haikuSeverity = haikuVerdict.severity;
     const haikuFollowUp = haikuVerdict.followUpNeeded;
     confusion[haikuSeverity][jevSeverity] += 1;

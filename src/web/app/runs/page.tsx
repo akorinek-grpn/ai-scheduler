@@ -91,8 +91,11 @@ function RunHistoryContent(): React.ReactElement {
     const failed = runs.filter((r) => r.status === "failed").length;
     const timeout = runs.filter((r) => r.status === "timeout").length;
     const running = runs.filter((r) => r.status === "running").length;
+    const deferred = runs.filter((r) => r.status === "deferred").length;
+    const blocked = runs.filter((r) => r.status === "blocked").length;
+    const killed = runs.filter((r) => r.status === "killed").length;
     const followUp = runs.filter((r) => r.evaluation?.followUpNeeded).length;
-    return { total, success, partial, failed, timeout, running, followUp };
+    return { total, success, partial, failed, timeout, running, deferred, blocked, killed, followUp };
   }, [runs]);
 
   const isFiltered = jobFilter !== null || statusFilter !== null || catchupOnly;
@@ -108,6 +111,9 @@ function RunHistoryContent(): React.ReactElement {
           {stats.partial > 0 && <span className="text-amber-500">{stats.partial} partial</span>}
           {stats.failed > 0 && <span className="text-red-500">{stats.failed} failed</span>}
           {stats.timeout > 0 && <span className="text-orange-500">{stats.timeout} timeout</span>}
+          {stats.killed > 0 && <span className="text-red-500">{stats.killed} killed</span>}
+          {stats.blocked > 0 && <span className="text-amber-500">{stats.blocked} blocked</span>}
+          {stats.deferred > 0 && <span className="text-slate-400">{stats.deferred} deferred</span>}
           {stats.running > 0 && <span className="text-yellow-500">{stats.running} running</span>}
           {stats.followUp > 0 && <span className="text-amber-500">{stats.followUp} follow-up</span>}
         </div>
@@ -187,13 +193,16 @@ function RunHistoryContent(): React.ReactElement {
           >
             all
           </button>
-          {(["success", "partial", "failed", "running", "timeout"] as const).map((s) => {
+          {(["success", "partial", "failed", "running", "timeout", "blocked", "deferred", "killed"] as const).map((s) => {
             const colors: Record<string, string> = {
               success: "text-green-500",
               partial: "text-amber-500",
               failed: "text-red-500",
               running: "text-yellow-500",
               timeout: "text-orange-500",
+              blocked: "text-amber-500",
+              deferred: "text-slate-400",
+              killed: "text-red-500",
             };
             return (
               <button

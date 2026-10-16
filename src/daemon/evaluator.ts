@@ -6,6 +6,7 @@ import type {
   RunDecision,
   RunEvaluation,
   RunStatus,
+  UsageLimitHit,
 } from "@shared/types";
 import { getLogPath, getEvalPath } from "@shared/paths";
 import {
@@ -119,12 +120,22 @@ function readOutput(projectRoot: string, jobId: string, runId: string): string {
   return output.trim() ? output : "(empty output)";
 }
 
-/** `claude -p --model haiku` over the prompt; tracks its own cost in evaluation-cost.json. Does not persist the evaluation. */
-function runHaiku(
+/** Model alias for the prose summary of a flagged run (cheap; the verdict is Jev's). */
+const SUMMARY_MODEL = "haiku";
+/**
+ * Model alias for the second opinion inside SECOND_OPINION_BAND. Sonnet since 2026-10-16: the
+ * 2026-10-15 replay found Haiku's band verdicts were mostly flags on runs that stood down on
+ * purpose, and with the Air on its own account the better judge costs nothing that matters.
+ */
+export const SECOND_OPINION_MODEL = "sonnet";
+
+/** `claude -p --model <model>` over the prompt; tracks its own cost in evaluation-cost.json. Does not persist the evaluation. */
+function runClaude(
   projectRoot: string,
   jobId: string,
   runId: string,
   prompt: string,
+  model: string,
 ): Promise<RunEvaluation | null> {
   writeEvaluationCost(projectRoot, jobId, runId, "pending");
 
@@ -134,7 +145,7 @@ function runHaiku(
       [
         "-p",
         "--model",
-        "haiku",
+        model,
         "--output-format",
         "json",
         "--no-session-persistence",
@@ -203,13 +214,14 @@ function runHaiku(
 const percent = (value: number): string => value.toFixed(2);
 
 /**
- * Jev's P(follow-up) is close to a coin flip in this band: in the 2026-10-05 adjudication of its
- * calls against the run logs, two of 19 follow-up decisions turned on a margin of 0.06 or less and
- * four clean runs sat at 0.43-0.48. In enforce mode Haiku gives a second opinion there, and the
- * evaluation keeps the more severe label and a follow-up asked for by either model: a missed
- * follow-up costs more than a needless one.
+ * Jev's P(follow-up) is close to a coin flip in this band, a margin around FOLLOW_UP_THRESHOLD.
+ * In enforce mode Haiku gives a second opinion there, and the evaluation keeps the more severe
+ * label and a follow-up asked for by either model: a missed follow-up costs more than a needless
+ * one. 0.40-0.60 until 2026-10-15; narrowed with the threshold move to 0.6 because the 2026-10-15
+ * log review found Haiku's band verdicts were mostly flags on runs that stood down on purpose
+ * (lock held, nothing eligible), none with hard evidence, so a wide band imported Haiku's noise.
  */
-export const SECOND_OPINION_BAND = { min: 0.4, max: 0.6 } as const;
+export const SECOND_OPINION_BAND = { min: 0.55, max: 0.65 } as const;
 
 const SEVERITY_ORDER: readonly EvalSeverity[] = [
   "ok",
@@ -307,8 +319,8 @@ async function evaluateRunInner(
   const mode = options.decisionMode ?? "off";
   const output = readOutput(projectRoot, jobId, runId);
   const prompt = buildEvalPrompt(jobName, status, exitCode, output);
-  const haiku = (): Promise<RunEvaluation | null> =>
-    runHaiku(projectRoot, jobId, runId, prompt);
+  const haiku = (model: string = SUMMARY_MODEL): Promise<RunEvaluation | null> =>
+    runClaude(projectRoot, jobId, runId, prompt, model);
   const input: DecisionInput = { jobName, status, exitCode, output };
 
   if (mode === "off") return persist(projectRoot, jobId, runId, await haiku());
@@ -359,8 +371,12 @@ async function evaluateRunInner(
   const decision = result.decision;
   if (!decision) return persist(projectRoot, jobId, runId, await haiku());
 
+  // One call serves both purposes: in the uncertain band the second-opinion model also writes
+  // the summary; outside it the summary model explains a warning, critical or follow-up run.
   let haikuVerdict: RunEvaluation | null = null;
-  if (needsHaiku(decision)) haikuVerdict = await haiku();
+  if (inSecondOpinionBand(decision.followUp.probability))
+    haikuVerdict = await haiku(SECOND_OPINION_MODEL);
+  else if (needsHaiku(decision)) haikuVerdict = await haiku();
   // Otherwise the evaluation is complete without a Haiku call; there is no Haiku cost to report.
   else writeEvaluationCost(projectRoot, jobId, runId, "complete", null);
   return persist(
@@ -418,13 +434,14 @@ function jevEvaluation(
       severity: haikuVerdict.severity,
       followUpNeeded: haikuVerdict.followUpNeeded,
     };
+    const opinionModel = benchmark ? SUMMARY_MODEL : SECOND_OPINION_MODEL;
     console.log(
-      `[eval] ${jobId}: haiku second opinion severity=${haikuVerdict.severity} followUp=${haikuVerdict.followUpNeeded} (jev P(follow-up)=${percent(followUp.probability)})`,
+      `[eval] ${jobId}: ${opinionModel} second opinion severity=${haikuVerdict.severity} followUp=${haikuVerdict.followUpNeeded} (jev P(follow-up)=${percent(followUp.probability)})`,
     );
     severity = moreSevere(severity, haikuVerdict.severity);
     if (haikuVerdict.followUpNeeded && !followUpNeeded) {
       followUpNeeded = true;
-      followUpReason = `Haiku second opinion (Jev P(follow-up)=${percent(followUp.probability)} is in the uncertain band): ${haikuVerdict.followUpReason ?? haikuVerdict.summary}`;
+      followUpReason = `${opinionModel === SUMMARY_MODEL ? "Haiku" : "Sonnet"} second opinion (Jev P(follow-up)=${percent(followUp.probability)} is in the uncertain band): ${haikuVerdict.followUpReason ?? haikuVerdict.summary}`;
     }
   }
   const haikuBenchmark =
@@ -474,6 +491,71 @@ function recordEvaluation(
       `[eval] ${jobId}: could not append the evaluation ledger: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+/**
+ * A run deferred by its precondition (exit 75) ran nothing: the scheduler rates it ok itself,
+ * without a Haiku or Jev call, and still writes the ledger line so the slot's history is whole.
+ * The summary carries the precondition's last line (what held the run back).
+ */
+export function evaluateDeferredRun(
+  projectRoot: string,
+  jobId: string,
+  runId: string,
+  jobName: string,
+  options: Pick<EvaluateOptions, "logRetainMonths"> = {},
+): RunEvaluation {
+  const output = readOutput(projectRoot, jobId, runId);
+  const reason =
+    output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("==="))
+      .at(-1) ?? "precondition exit 75";
+  const evaluation: RunEvaluation = {
+    summary: `${jobName} deferred by its precondition: ${reason}`,
+    severity: "ok",
+    followUpNeeded: false,
+    followUpReason: null,
+    evaluatedAt: new Date().toISOString(),
+    source: "scheduler",
+  };
+  writeEvaluationCost(projectRoot, jobId, runId, "complete", null);
+  persist(projectRoot, jobId, runId, evaluation);
+  recordEvaluation(projectRoot, jobId, runId, options.logRetainMonths);
+  return evaluation;
+}
+
+/**
+ * A run `blocked` by the account's usage limit (2026-10-16): the limit line is the whole
+ * story, so no model reads the log. Warning, no follow-up (the hold is the response, and the
+ * dashboard banner the notice), source `scheduler`, one ledger line like any other run.
+ */
+export function evaluateUsageLimitedRun(
+  projectRoot: string,
+  jobId: string,
+  runId: string,
+  jobName: string,
+  hit: UsageLimitHit,
+  heldUntil: string | null,
+  options: Pick<EvaluateOptions, "logRetainMonths"> = {},
+): RunEvaluation {
+  const evaluation: RunEvaluation = {
+    summary:
+      `${jobName} stopped: the Claude account's ${hit.kind} usage limit is exhausted ("${hit.text}"). ` +
+      (heldUntil
+        ? `Jobs that start a Claude session on this Mac are held until ${heldUntil}.`
+        : "Jobs that start a Claude session on this Mac are held."),
+    severity: "warning",
+    followUpNeeded: false,
+    followUpReason: null,
+    evaluatedAt: new Date().toISOString(),
+    source: "scheduler",
+  };
+  writeEvaluationCost(projectRoot, jobId, runId, "complete", null);
+  persist(projectRoot, jobId, runId, evaluation);
+  recordEvaluation(projectRoot, jobId, runId, options.logRetainMonths);
+  return evaluation;
 }
 
 export async function evaluateRun(

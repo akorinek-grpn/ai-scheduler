@@ -140,4 +140,48 @@ describe("configSchema", () => {
     const result = configSchema.safeParse(input);
     expect(result.success).toBe(true);
   });
+
+  describe("precondition and outcome codes (2026-10-16)", () => {
+    const job = (extra: Record<string, unknown>) => ({
+      version: 1,
+      jobs: { j: { name: "J", schedule: "0 * * * *", directory: "/tmp", prompt: "p", ...extra } },
+    });
+
+    it("accepts a precondition with its timeout, retry delay and blocked exit codes", () => {
+      const result = configSchema.safeParse(
+        job({
+          precondition: "bash scripts/precondition-autopilot-lock.sh",
+          precondition_timeout: 30,
+          retry_after: 300,
+          outcome_codes: { blocked: [30] },
+        }),
+      );
+      expect(result.success).toBe(true);
+      if (result.success)
+        expect(result.data.jobs.j).toMatchObject({
+          precondition: "bash scripts/precondition-autopilot-lock.sh",
+          precondition_timeout: 30,
+          retry_after: 300,
+          outcome_codes: { blocked: [30] },
+        });
+    });
+
+    it("leaves them unset by default", () => {
+      const result = configSchema.safeParse(job({}));
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.jobs.j.precondition).toBeUndefined();
+        expect(result.data.jobs.j.outcome_codes).toBeUndefined();
+      }
+    });
+
+    it("rejects an empty precondition, a non-positive delay and an exit code outside 1-255", () => {
+      expect(configSchema.safeParse(job({ precondition: "" })).success).toBe(false);
+      expect(configSchema.safeParse(job({ retry_after: 0 })).success).toBe(false);
+      expect(configSchema.safeParse(job({ precondition_timeout: -1 })).success).toBe(false);
+      expect(configSchema.safeParse(job({ outcome_codes: { blocked: [0] } })).success).toBe(false);
+      expect(configSchema.safeParse(job({ outcome_codes: { blocked: [256] } })).success).toBe(false);
+      expect(configSchema.safeParse(job({ outcome_codes: { blocked: ["30"] } })).success).toBe(false);
+    });
+  });
 });

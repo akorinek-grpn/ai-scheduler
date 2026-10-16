@@ -62,9 +62,9 @@ export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.Rea
   const lastRun = recentRuns[0];
   const statusColor = lastRun?.status === "success"
     ? "bg-green-500"
-    : lastRun?.status === "partial"
+    : lastRun?.status === "partial" || lastRun?.status === "blocked"
       ? "bg-amber-500"
-      : lastRun?.status === "failed"
+      : lastRun?.status === "failed" || lastRun?.status === "killed"
         ? "bg-red-500"
         : lastRun?.status === "running"
           ? "bg-yellow-500"
@@ -72,7 +72,8 @@ export function JobCard({ job, recentRuns, onTrigger }: JobCardProps): React.Rea
             ? "bg-orange-500"
             : "bg-muted-foreground/50";
 
-  const completedRuns = recentRuns.filter((r) => r.status !== "running");
+  // A deferred run never ran, so it is neither a success nor a failure in the rate.
+  const completedRuns = recentRuns.filter((r) => r.status !== "running" && r.status !== "deferred");
   const successRuns = completedRuns.filter((r) => r.status === "success");
   const successRate = completedRuns.length > 0
     ? Math.round((successRuns.length / completedRuns.length) * 100)

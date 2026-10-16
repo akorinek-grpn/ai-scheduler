@@ -40,6 +40,34 @@ jobs:
     }
   });
 
+  it("accepts uses_claude on a script job (held with the Claude jobs by the usage hold)", () => {
+    fs.writeFileSync(
+      configPath,
+      `version: 1
+jobs:
+  autopilot:
+    name: "Autopilot"
+    schedule: "25 * * * *"
+    directory: /tmp/test
+    type: script
+    command: "bash run.sh"
+    uses_claude: true
+  janitor:
+    name: "Janitor"
+    schedule: "45 * * * *"
+    directory: /tmp/test
+    type: script
+    command: "npm run janitor"
+`
+    );
+    const result = loadConfig(configPath);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.jobs.autopilot.uses_claude).toBe(true);
+      expect(result.data.jobs.janitor.uses_claude).toBeUndefined();
+    }
+  });
+
   it("returns error for invalid YAML", () => {
     fs.writeFileSync(configPath, ":::invalid yaml:::");
     const result = loadConfig(configPath);

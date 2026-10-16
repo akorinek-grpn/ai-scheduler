@@ -24,7 +24,8 @@ const entrySchema = z.object({
   id: z.string().min(1).max(256),
   label: z.string().min(1).max(256),
   source: z.enum(["claude", "script"]),
-  costUsd: amountSchema,
+  // null: tokens known, dollars not (an unlisted model in a transcript-priced inner session).
+  costUsd: amountSchema.nullable(),
   model: z.string().trim().min(1).max(256).optional(),
   tokens: tokensSchema.nullable(),
   models: z.array(
@@ -207,16 +208,17 @@ export class CostTracker {
     }
     if (event.type !== "scheduler_cost") return false;
     this.complete = false;
+    // A script report must state its cost in USD; a missing or foreign-currency amount is invalid.
     const parsed = entrySchema.safeParse({
       id: event.id,
       label: event.label ?? event.id,
       source: "script",
-      costUsd: event.currency === "USD" ? event.cost_usd : null,
+      costUsd: event.currency === "USD" ? event.cost_usd : undefined,
       model: event.model,
       tokens: parseTokens(event.usage),
       models: [],
     });
-    if (parsed.success) this.entries.set(parsed.data.id, parsed.data);
+    if (parsed.success && parsed.data.costUsd !== null) this.entries.set(parsed.data.id, parsed.data);
     else this.invalidReport = true;
     return true;
   }
@@ -364,7 +366,12 @@ export function summarizeRunCost({
   ]);
   const executionComplete =
     attempts.length > 0 &&
-    attempts.every((attempt) => attempt.complete && attempt.entries.length > 0);
+    attempts.every(
+      (attempt) =>
+        attempt.complete &&
+        attempt.entries.length > 0 &&
+        attempt.entries.every((entry) => entry.costUsd !== null),
+    );
   const decisionState = decision?.state ?? "off";
   const decisionReported =
     decisionState === "complete" && decisionCostUsd !== null;

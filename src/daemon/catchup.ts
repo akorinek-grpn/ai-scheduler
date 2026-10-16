@@ -162,8 +162,16 @@ export function startGapWatcher(deps: GapWatcherDeps): NodeJS.Timeout {
   return timer;
 }
 
+/** How a queue entry runs: a catch-up of a missed slot, or the retry of a slot whose run was deferred. */
+export interface QueueRunOptions {
+  kind: "catchup" | "retry";
+  /** 1 or 2 for a retry: which retry of the slot this is. */
+  retry?: number;
+}
+
 export interface CatchupQueueDeps {
-  runCatchup: (jobId: string, missedSlot: Date) => Promise<void>;
+  /** Runs a catch-up of the slot; `options` is passed only for the retry of a deferred slot. */
+  runCatchup: (jobId: string, missedSlot: Date, options?: QueueRunOptions) => Promise<void>;
   isJobActive: (jobId: string) => boolean;
   jobName: (jobId: string) => string;
   /** The job's scheduler.yaml `catchup` policy; undefined means "always". */
@@ -179,6 +187,12 @@ export interface CatchupQueueDeps {
    * start at once.
    */
   waitForNetwork?: () => Promise<unknown>;
+  /**
+   * The usage hold (2026-10-16): the instant (ms) until which `jobId` must not start, or null.
+   * A held entry stays queued (catch-ups and deferred retries alike) and is picked again once
+   * the hold ends; the queue arms a timer for it.
+   */
+  holdUntil?: (jobId: string) => number | null;
   gapMs?: number;
 }
 
@@ -189,6 +203,12 @@ interface PendingEntry {
   jobId: string;
   missedSlot: Date;
   enqueuedAt: Date;
+  kind: "catchup" | "retry";
+  /** A run of the job that started at or after this instant covers the entry (see dropCovered). */
+  coveredFromMs: number;
+  /** Retries only: do not start before this instant. */
+  notBefore?: Date;
+  retry?: number;
 }
 
 interface InFlightEntry {
@@ -211,8 +231,10 @@ export class CatchupQueue {
   private inFlight: InFlightEntry | null = null;
   private gapMs: number;
   private gapTimer: NodeJS.Timeout | null = null;
+  private delayTimer: NodeJS.Timeout | null = null;
   private networkWait: Promise<void> | null = null;
   private networkWaitEndedAt: number | null = null;
+  private paused = false;
 
   constructor(private deps: CatchupQueueDeps) {
     this.gapMs = deps.gapMs ?? DEFAULT_GAP_MS;
@@ -236,8 +258,50 @@ export class CatchupQueue {
       jobId,
       missedSlot,
       enqueuedAt: existing?.enqueuedAt ?? new Date(),
+      kind: "catchup",
+      coveredFromMs: slotMs,
     });
     return true;
+  }
+
+  /**
+   * Queue the retry of a slot whose run was deferred by its precondition (2026-10-16): the same
+   * slot again, not before `notBefore`, counted as retry number `retry`. The job's `catchup`
+   * policy does not apply (this is the slot's own run, not a catch-up), and the entry is covered
+   * only by a run that starts after the deferred one (`afterStartedAt`), since that run itself
+   * started after the slot. Replaces whatever the job had queued; one entry per job.
+   */
+  enqueueRetry(
+    jobId: string,
+    slot: Date,
+    options: { retry: number; notBefore: Date; afterStartedAt: string },
+  ): void {
+    const afterMs = Date.parse(options.afterStartedAt);
+    this.pending.set(jobId, {
+      jobId,
+      missedSlot: slot,
+      enqueuedAt: new Date(),
+      kind: "retry",
+      coveredFromMs: (Number.isFinite(afterMs) ? afterMs : Date.now()) + 1,
+      notBefore: options.notBefore,
+      retry: options.retry,
+    });
+    console.log(
+      `[catchup] Queued retry ${options.retry} of ${jobId} for slot ${slot.toISOString()} at ${options.notBefore.toISOString()} (run deferred by its precondition)`,
+    );
+  }
+
+  /** Stops starting entries (a drain). Queued entries stay for the next daemon's startup sweep. */
+  pause(): void {
+    this.paused = true;
+    if (this.delayTimer) {
+      clearTimeout(this.delayTimer);
+      this.delayTimer = null;
+    }
+  }
+
+  isPaused(): boolean {
+    return this.paused;
   }
 
   /** Applies the job's `catchup` policy to a catch-up that would start now; logs a skip. */
@@ -265,6 +329,9 @@ export class CatchupQueue {
         jobName: this.deps.jobName(e.jobId),
         missedSlot: e.missedSlot.toISOString(),
         enqueuedAt: e.enqueuedAt.toISOString(),
+        kind: e.kind,
+        ...(e.notBefore ? { notBefore: e.notBefore.toISOString() } : {}),
+        ...(e.retry !== undefined ? { retry: e.retry } : {}),
       }),
     );
     const inFlight: CatchupQueueInFlight | null = this.inFlight
@@ -290,26 +357,59 @@ export class CatchupQueue {
     for (const [jobId, entry] of this.pending) {
       const startedAt = newestRunStartedAt(jobId);
       const startedMs = startedAt === null ? NaN : Date.parse(startedAt);
-      if (!(startedMs >= entry.missedSlot.getTime())) continue;
+      if (!(startedMs >= entry.coveredFromMs)) continue;
       this.pending.delete(jobId);
       console.log(
-        `[catchup] Dropped ${jobId} catch-up for missed slot ${entry.missedSlot.toISOString()}: already covered by the run started ${new Date(startedMs).toISOString()}`,
+        `[catchup] Dropped ${jobId} ${entry.kind === "retry" ? "retry" : "catch-up"} for missed slot ${entry.missedSlot.toISOString()}: already covered by the run started ${new Date(startedMs).toISOString()}`,
       );
     }
+  }
+
+  /**
+   * The first entry that may start now: a catch-up whose policy still allows it (entries that
+   * fell out of policy are dropped), or a retry whose notBefore has passed. Arms a timer for the
+   * earliest retry still waiting when nothing is due.
+   */
+  private nextDue(): PendingEntry | null {
+    const now = Date.now();
+    let earliestWait: number | null = null;
+    for (const entry of [...this.pending.values()]) {
+      const heldUntil = this.deps.holdUntil?.(entry.jobId) ?? null;
+      if (heldUntil !== null && heldUntil > now) {
+        const wait = heldUntil - now;
+        if (earliestWait === null || wait < earliestWait) earliestWait = wait;
+        continue;
+      }
+      if (entry.kind === "catchup") {
+        // Re-check the policy at start time: an entry can wait past midnight behind others.
+        if (!this.policyAllowsNow(entry.jobId, entry.missedSlot)) {
+          this.pending.delete(entry.jobId);
+          continue;
+        }
+        return entry;
+      }
+      const wait = entry.notBefore ? entry.notBefore.getTime() - now : 0;
+      if (wait <= 0) return entry;
+      if (earliestWait === null || wait < earliestWait) earliestWait = wait;
+    }
+    if (earliestWait !== null && !this.delayTimer) {
+      this.delayTimer = setTimeout(() => {
+        this.delayTimer = null;
+        this.process();
+      }, earliestWait);
+      this.delayTimer.unref?.();
+    }
+    return null;
   }
 
   process(): void {
     // Before the busy checks, so any poke (a run ending, a sweep) clears covered entries.
     this.dropCovered();
+    if (this.paused) return;
     if (this.inFlight) return;
     if (this.gapTimer) return;
     if (this.networkWait) return;
-    let next = this.pending.values().next().value;
-    // Re-check the policy at start time: an entry can wait past midnight behind others.
-    while (next && !this.policyAllowsNow(next.jobId, next.missedSlot)) {
-      this.pending.delete(next.jobId);
-      next = this.pending.values().next().value;
-    }
+    const next = this.nextDue();
     if (!next) return;
 
     if (this.deps.isJobActive(next.jobId)) {
@@ -343,8 +443,11 @@ export class CatchupQueue {
     this.pending.delete(next.jobId);
     this.inFlight = { jobId: next.jobId, startedAt: new Date() };
 
-    void this.deps
-      .runCatchup(next.jobId, next.missedSlot)
+    const run =
+      next.kind === "retry"
+        ? this.deps.runCatchup(next.jobId, next.missedSlot, { kind: "retry", retry: next.retry })
+        : this.deps.runCatchup(next.jobId, next.missedSlot);
+    void run
       .catch((err: unknown) => {
         console.error(`[catchup] ${next.jobId}: run failed:`, err);
       })

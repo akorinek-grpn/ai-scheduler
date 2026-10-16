@@ -30,6 +30,9 @@ const RUN_STATUSES: readonly RunStatus[] = [
   "partial",
   "failed",
   "timeout",
+  "deferred",
+  "blocked",
+  "killed",
 ];
 
 type JsonRecord = Record<string, unknown>;

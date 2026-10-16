@@ -10,6 +10,7 @@ import { ResearchInsights } from "@/components/research-insights";
 import { LifetimeActivity } from "@/components/lifetime-activity";
 import { DashboardCharts } from "@/components/dashboard-charts";
 import { CostOverview } from "@/components/cost-overview";
+import { UsageCard } from "@/components/usage-card";
 import {
   getHealth,
   getJobs,
@@ -109,6 +110,8 @@ export default function DashboardPage(): React.ReactElement {
         health={shownHealth}
         unknownLabel={isOther && viewed && !viewed.ssh ? "Not checked from here" : undefined}
       />
+
+      <UsageCard />
 
       {/* The panel keeps only catch-ups; the recent runs are merged in for a daemon that ignores ?trigger=. */}
       <CatchupRunsPanel runs={catchupRuns.concat(runs)} queue={catchups} />

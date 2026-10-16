@@ -31,8 +31,8 @@ export function startCatchup(
 ): CatchupWiring {
   const isActive = (jobId: string) => engine.getActiveJobIds().includes(jobId);
   const queue = new CatchupQueue({
-    runCatchup: async (jobId, slot) => {
-      await engine.runCatchup(jobId, slot);
+    runCatchup: async (jobId, slot, options) => {
+      await engine.runCatchup(jobId, slot, options);
     },
     isJobActive: isActive,
     jobName: (jobId) => engine.getCurrentConfig()?.jobs[jobId]?.name ?? jobId,
@@ -41,6 +41,8 @@ export function startCatchup(
     newestRunStartedAt: (jobId) =>
       getNewestRunStartedAt(opts.projectRoot, jobId),
     waitForNetwork: opts.waitForNetwork,
+    // Held jobs (the account's usage window is exhausted) stay queued until the hold ends.
+    holdUntil: (jobId) => engine.holdUntilMsFor(jobId),
   });
   engine.setCatchupQueue(queue);
 

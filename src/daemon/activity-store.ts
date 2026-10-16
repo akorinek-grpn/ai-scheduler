@@ -27,7 +27,7 @@ export const runStatsSchema = z
 export const runVerdictSchema = z.object({
   severity: z.enum(["ok", "info", "warning", "critical"]),
   followUpNeeded: z.boolean(),
-  source: z.enum(["haiku", "jev", "jev+haiku"]).optional(),
+  source: z.enum(["haiku", "jev", "jev+haiku", "scheduler"]).optional(),
   // Benchmark mode: Haiku's verdict beside Jev's, kept so pruned runs still count as comparisons.
   haikuBenchmark: z
     .object({

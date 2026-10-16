@@ -45,6 +45,15 @@ const STATUS_STYLE: Record<
     dot: "bg-orange-600 dark:bg-orange-500",
     text: "text-orange-700 dark:text-orange-400",
   },
+  deferred: { dot: "bg-slate-500 dark:bg-slate-400", text: "text-muted-foreground" },
+  blocked: {
+    dot: "bg-amber-600 dark:bg-amber-500",
+    text: "text-amber-700 dark:text-amber-400",
+  },
+  killed: {
+    dot: "bg-red-600 dark:bg-red-500",
+    text: "text-red-700 dark:text-red-400",
+  },
 };
 
 // Padding and alignment are set per cell so no two utilities compete for the same property.

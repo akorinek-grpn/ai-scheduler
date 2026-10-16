@@ -28,6 +28,9 @@ interface DayBucket {
   failed: number;
   timeout: number;
   running: number;
+  deferred: number;
+  blocked: number;
+  killed: number;
   total: number;
 }
 
@@ -53,6 +56,9 @@ function buildDayBuckets(runs: RunResponse[], dayCount: number): DayBucket[] {
       failed: 0,
       timeout: 0,
       running: 0,
+      deferred: 0,
+      blocked: 0,
+      killed: 0,
       total: 0,
     });
   }
@@ -110,6 +116,9 @@ function ActivityChart({ runs }: { runs: RunResponse[] }): React.ReactElement {
         <Bar dataKey="partial" stackId="a" fill="oklch(0.75 0.17 75)" radius={[0, 0, 0, 0]} />
         <Bar dataKey="failed" stackId="a" fill="oklch(0.60 0.22 25)" radius={[0, 0, 0, 0]} />
         <Bar dataKey="timeout" stackId="a" fill="oklch(0.70 0.17 55)" radius={[0, 0, 0, 0]} />
+        <Bar dataKey="killed" stackId="a" fill="oklch(0.50 0.20 25)" radius={[0, 0, 0, 0]} />
+        <Bar dataKey="blocked" stackId="a" fill="oklch(0.80 0.14 80)" radius={[0, 0, 0, 0]} />
+        <Bar dataKey="deferred" stackId="a" fill="oklch(0.70 0.02 260)" radius={[0, 0, 0, 0]} />
         <Bar dataKey="running" stackId="a" fill="oklch(0.75 0.15 85)" radius={[2, 2, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
@@ -119,7 +128,7 @@ function ActivityChart({ runs }: { runs: RunResponse[] }): React.ReactElement {
 // --- Job health heatmap: jobs x recent days ---
 
 interface HeatmapCell {
-  status: "success" | "partial" | "failed" | "timeout" | "mixed" | "none";
+  status: "success" | "partial" | "failed" | "timeout" | "blocked" | "deferred" | "mixed" | "none";
   count: number;
 }
 
@@ -128,6 +137,8 @@ const heatColors: Record<string, string> = {
   partial: "bg-amber-500",
   failed: "bg-red-500",
   timeout: "bg-orange-500",
+  blocked: "bg-amber-500",
+  deferred: "bg-slate-400",
   mixed: "bg-amber-500",
   none: "bg-muted",
 };
@@ -158,14 +169,19 @@ function JobHeatmap({ runs, jobs }: { runs: RunResponse[]; jobs: JobResponse[] }
       const cells: HeatmapCell[] = days.map(({ date }) => {
         const dayRuns = jobRuns.filter((r) => new Date(r.startedAt).toISOString().slice(0, 10) === date);
         if (dayRuns.length === 0) return { status: "none", count: 0 };
-        const hasFailed = dayRuns.some((r) => r.status === "failed");
+        const hasFailed = dayRuns.some((r) => r.status === "failed" || r.status === "killed");
         const hasTimeout = dayRuns.some((r) => r.status === "timeout");
         const hasPartial = dayRuns.some((r) => r.status === "partial");
-        const allSuccess = dayRuns.every((r) => r.status === "success");
+        const hasBlocked = dayRuns.some((r) => r.status === "blocked");
+        // Deferred runs ran nothing: a day of only deferrals is grey, otherwise they do not count.
+        const ran = dayRuns.filter((r) => r.status !== "deferred");
+        if (ran.length === 0) return { status: "deferred", count: dayRuns.length };
+        const allSuccess = ran.every((r) => r.status === "success");
         if (allSuccess) return { status: "success", count: dayRuns.length };
         if (hasFailed) return { status: "failed", count: dayRuns.length };
         if (hasTimeout) return { status: "timeout", count: dayRuns.length };
         if (hasPartial) return { status: "partial", count: dayRuns.length };
+        if (hasBlocked) return { status: "blocked", count: dayRuns.length };
         return { status: "mixed", count: dayRuns.length };
       });
       return { job, cells };

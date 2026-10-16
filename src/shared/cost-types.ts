@@ -14,7 +14,8 @@ export interface CostEntry {
   id: string;
   label: string;
   source: "claude" | "script";
-  costUsd: number;
+  /** null when the tokens are known but a model has no list price (see shared/model-prices.ts). */
+  costUsd: number | null;
   tokens: TokenUsage | null;
   models: ModelCost[];
   model?: string;

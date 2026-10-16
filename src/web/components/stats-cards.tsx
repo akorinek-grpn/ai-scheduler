@@ -21,7 +21,9 @@ export function StatsCards({ jobs, runs, health, unknownLabel }: StatsCardsProps
   });
   const successCount = todayRuns.filter((r) => r.status === "success").length;
   const partialCount = todayRuns.filter((r) => r.status === "partial").length;
-  const failedCount = todayRuns.filter((r) => r.status === "failed").length;
+  const failedCount = todayRuns.filter((r) => r.status === "failed" || r.status === "killed").length;
+  const blockedCount = todayRuns.filter((r) => r.status === "blocked").length;
+  const deferredCount = todayRuns.filter((r) => r.status === "deferred").length;
   const runningCount = todayRuns.filter((r) => r.status === "running").length;
   const followUpCount = runs.filter((r) => r.evaluation?.followUpNeeded).length;
 
@@ -56,6 +58,8 @@ export function StatsCards({ jobs, runs, health, unknownLabel }: StatsCardsProps
           {successCount > 0 && <span className="text-[12px] text-green-500 tabular-nums">{successCount} ok</span>}
           {partialCount > 0 && <span className="text-[12px] text-amber-500 tabular-nums">{partialCount} partial</span>}
           {failedCount > 0 && <span className="text-[12px] text-red-500 tabular-nums">{failedCount} fail</span>}
+          {blockedCount > 0 && <span className="text-[12px] text-amber-500 tabular-nums">{blockedCount} blocked</span>}
+          {deferredCount > 0 && <span className="text-[12px] text-slate-400 tabular-nums">{deferredCount} deferred</span>}
           {runningCount > 0 && <span className="text-[12px] text-yellow-500 tabular-nums">{runningCount} running</span>}
         </span>
       </div>

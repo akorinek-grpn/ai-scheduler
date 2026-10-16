@@ -4,6 +4,7 @@ import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
 import { NotificationProvider } from "@/components/notification-provider";
 import { HostBanner, HostViewProvider } from "@/components/host-view";
+import { UsageHoldBanner } from "@/components/usage-hold-banner";
 
 const geist = Geist({
   variable: "--font-geist",
@@ -46,6 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }):
               <Sidebar />
               <main id="main-content" className="flex-1 overflow-auto p-4 md:p-6" tabIndex={-1}>
                 <HostBanner />
+                <UsageHoldBanner />
                 {children}
               </main>
             </div>

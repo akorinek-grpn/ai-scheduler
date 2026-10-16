@@ -444,6 +444,29 @@ describe("runJob scheduler env", () => {
       }
     },
   );
+
+  it("passes SCHEDULER_DEADLINE, the instant the attempt is killed at, to the job and its precondition", async () => {
+    // 2026-10-16: a review round stops starting PRs it cannot finish before this instant.
+    const before = Date.now();
+    const run = await runJob({
+      jobId: "test-job",
+      jobConfig: { ...testJob, timeout: 1234, precondition: 'echo "pre=$SCHEDULER_DEADLINE"' },
+      projectRoot: tmpDir,
+      trigger: "scheduled",
+      command: "sh",
+      args: ["-c", 'echo "job=$SCHEDULER_DEADLINE"'],
+    });
+    const log = logOf(run.runId);
+    // The log also echoes the precondition command itself (pre=$SCHEDULER_DEADLINE): match values only.
+    const deadlines = [...log.matchAll(/(pre|job)=(\d{4}-\S+)/g)].map((m) => [m[1], Date.parse(m[2])] as const);
+    expect(deadlines.map(([k]) => k)).toEqual(["pre", "job"]);
+    for (const [, ms] of deadlines) {
+      expect(ms - before).toBeGreaterThanOrEqual(1234_000 - 1000);
+      expect(ms - before).toBeLessThanOrEqual(1234_000 + 5000);
+    }
+    // The attempt's deadline is measured from its own start, after the precondition ran.
+    expect(deadlines[1][1]).toBeGreaterThanOrEqual(deadlines[0][1]);
+  });
 });
 
 describe("runJob maxRetries", () => {

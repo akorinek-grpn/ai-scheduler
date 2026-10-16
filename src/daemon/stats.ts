@@ -176,7 +176,7 @@ function readRunActivity(
     },
     completed:
       status !== undefined &&
-      ["success", "partial", "failed", "timeout"].includes(status),
+      ["success", "partial", "failed", "timeout", "deferred", "blocked", "killed"].includes(status),
   };
 }
 

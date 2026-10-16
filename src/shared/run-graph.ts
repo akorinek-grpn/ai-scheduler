@@ -877,10 +877,13 @@ function parseToolLine(
 function logLaneStatus(status: RunStatus | null): RunGraphLaneStatus {
   switch (status) {
     case "success":
+    case "blocked": // finished on its own, handing the work to a person
       return "ok";
     case "running":
       return "running";
     case "timeout":
+    case "killed":
+    case "deferred": // nothing ran
       return "stopped";
     default:
       return "error";

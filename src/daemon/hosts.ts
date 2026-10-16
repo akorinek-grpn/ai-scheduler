@@ -6,6 +6,7 @@ import {
   jobRunsOnRole,
   type SchedulerConfig,
 } from "@shared/config-schema";
+import type { UsageHold } from "@shared/types";
 
 /** What /api/health returns, here or on another host. */
 export interface DaemonHealthSnapshot {
@@ -14,6 +15,9 @@ export interface DaemonHealthSnapshot {
   startedAt: string;
   activeJobs: string[];
   host?: { name: string; role: string } | null;
+  draining?: boolean;
+  /** That Mac's Claude jobs are held until `until` (its account's usage window is exhausted). */
+  usageHold?: UsageHold | null;
 }
 
 export type HostProbe = (ssh: string) => Promise<DaemonHealthSnapshot>;

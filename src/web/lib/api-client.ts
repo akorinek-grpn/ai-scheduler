@@ -26,12 +26,50 @@ export interface HostInfo {
   role: string;
 }
 
+/** The usage hold: that Mac's Claude jobs are held until `until` (its account's window is exhausted). */
+export interface UsageHoldInfo {
+  kind: "weekly" | "session";
+  until: string;
+  since: string;
+  text?: string;
+  skipped: number;
+  jobId?: string | null;
+  runId?: string | null;
+}
+
 export interface HealthResponse {
   status: string;
   pid: number;
   startedAt: string;
   activeJobs: string[];
   host?: HostInfo | null;
+  draining?: boolean;
+  usageHold?: UsageHoldInfo | null;
+}
+
+/** One window of a headroom sample (scripts/usage-headroom.py). */
+export interface UsageWindow {
+  label: string;
+  utilization_percent: number | null;
+  assumed_fraction?: boolean;
+  resets_at: string | null;
+}
+
+export interface UsageSample {
+  version?: number;
+  at: string;
+  host?: string;
+  status: "ok" | "unavailable";
+  http?: number | null;
+  parsed?: boolean;
+  windows: Record<string, UsageWindow>;
+  error?: string | null;
+}
+
+export interface UsageResponse {
+  latest: UsageSample | null;
+  samples: UsageSample[];
+  hold: UsageHoldInfo | null;
 }
 
 export interface HostJobSummary {
@@ -95,7 +133,7 @@ export interface RunEvaluation {
   followUpNeeded: boolean;
   followUpReason: string | null;
   evaluatedAt: string;
-  source?: "haiku" | "jev" | "jev+haiku";
+  source?: "haiku" | "jev" | "jev+haiku" | "scheduler";
 }
 
 export interface RunResponse {
@@ -103,7 +141,7 @@ export interface RunResponse {
   runId: string;
   jobName: string;
   directory: string;
-  status: "running" | "success" | "partial" | "failed" | "timeout";
+  status: "running" | "success" | "partial" | "failed" | "timeout" | "deferred" | "blocked" | "killed";
   trigger: "scheduled" | "manual" | "catchup";
   startedAt: string;
   finishedAt: string | null;
@@ -156,6 +194,11 @@ export function getJobs(host?: string): Promise<JobResponse[]> {
 
 export function getHosts(): Promise<HostsResponse> {
   return fetchApi("/hosts");
+}
+
+/** This daemon's headroom samples and usage hold (another host's are not read from here). */
+export function getUsage(): Promise<UsageResponse> {
+  return fetchApi("/usage");
 }
 
 export function getRuns(params?: {

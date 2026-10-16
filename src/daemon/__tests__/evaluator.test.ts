@@ -262,7 +262,8 @@ describe("evaluator decision modes", () => {
       followUpReason: "nothing was posted",
     });
     const fetchMock = vi.fn(async () =>
-      jevReply({ "0": 0.2, "1": 0.7, "2": 0.1, "3": 0 }, 0.45),
+      // 0.57: inside the 0.55-0.65 band (band and threshold moved 2026-10-15).
+      jevReply({ "0": 0.2, "1": 0.7, "2": 0.1, "3": 0 }, 0.57),
     );
     const evaluation = await evaluateRun(
       root,
@@ -304,8 +305,9 @@ describe("evaluator decision modes", () => {
       followUpNeeded: false,
       followUpReason: null,
     });
+    // 0.58: inside the 0.55-0.65 band and below the 0.6 threshold (band and threshold moved 2026-10-15).
     const fetchMock = vi.fn(async () =>
-      jevReply({ "0": 0.3, "1": 0.6, "2": 0.1, "3": 0 }, 0.48),
+      jevReply({ "0": 0.3, "1": 0.6, "2": 0.1, "3": 0 }, 0.58),
     );
     const evaluation = await evaluateRun(
       root,
@@ -330,6 +332,25 @@ describe("evaluator decision modes", () => {
     });
   });
 
+  it("enforce: asks Haiku nothing below the band (0.48 was inside the old 0.40-0.60 band)", async () => {
+    const calls = fakeHaiku({
+      summary: "should not be asked",
+      severity: "warning",
+      followUpNeeded: true,
+      followUpReason: "noise",
+    });
+    const fetchMock = vi.fn(async () =>
+      jevReply({ "0": 0.3, "1": 0.6, "2": 0.1, "3": 0 }, 0.48),
+    );
+    const evaluation = await evaluateRun(root, "job", "run", "Job", "success", 0, {
+      decisionMode: "enforce",
+      decision: decision(fetchMock),
+    });
+    expect(haikuCalls(calls)).toBe(0);
+    expect(evaluation).toMatchObject({ severity: "info", followUpNeeded: false, source: "jev" });
+    expect(evaluation?.secondOpinion).toBeUndefined();
+  });
+
   it("enforce: never lets the second opinion lower Jev's verdict", async () => {
     fakeHaiku({
       summary: "Haiku thinks it was fine",
@@ -338,9 +359,10 @@ describe("evaluator decision modes", () => {
       followUpReason: null,
     });
     const fetchMock = vi.fn(async () =>
+      // 0.62: inside the band and at or above the 0.6 threshold, so Jev itself asks for the follow-up.
       jevReply(
         { "0": 0.1, "1": 0.2, "2": 0.7, "3": 0 },
-        0.56,
+        0.62,
         "missing_output",
       ),
     );
@@ -388,7 +410,8 @@ describe("evaluator decision modes", () => {
 
     vi.stubEnv("PATH", "/nonexistent");
     const uncertain = vi.fn(async () =>
-      jevReply({ "0": 0.3, "1": 0.6, "2": 0.1, "3": 0 }, 0.42),
+      // 0.57: inside the 0.55-0.65 band, below the 0.6 threshold (moved 2026-10-15).
+      jevReply({ "0": 0.3, "1": 0.6, "2": 0.1, "3": 0 }, 0.57),
     );
     const fallback = await evaluateRun(
       root,
@@ -491,7 +514,7 @@ describe("evaluator decision modes", () => {
     expect(kept?.secondOpinion).toBeUndefined();
 
     const uncertain = vi.fn(async () =>
-      jevReply({ "0": 0.2, "1": 0.7, "2": 0.1, "3": 0 }, 0.45),
+      jevReply({ "0": 0.2, "1": 0.7, "2": 0.1, "3": 0 }, 0.57), // in the 0.55-0.65 band
     );
     const raised = await evaluateRun(root, "job", "run", "Job", "success", 0, {
       decisionMode: "benchmark",

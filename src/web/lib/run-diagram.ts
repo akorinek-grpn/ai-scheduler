@@ -252,6 +252,9 @@ const RUN_STATUS_OUTCOME: Record<RunGraph["status"], OutcomeLabel> = {
   partial: { text: "partial", tone: "warning" },
   failed: { text: "failed", tone: "error" },
   timeout: { text: "timeout", tone: "error" },
+  deferred: { text: "deferred · precondition said not now", tone: "muted" },
+  blocked: { text: "blocked · waiting on a person", tone: "warning" },
+  killed: { text: "killed · no exit code", tone: "error" },
 };
 
 /**

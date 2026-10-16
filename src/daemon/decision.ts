@@ -11,6 +11,12 @@ import { z } from "zod";
 import type { DecisionUsage } from "@shared/cost-types";
 import type { EvalSeverity, RunDecision, RunStatus } from "@shared/types";
 
+/**
+ * P(follow-up) at or above this flags a follow-up. 0.6 since 2026-10-15: a replay of 303 retained
+ * runs put every failed, timed-out or partial run at 0.63 or higher, while 0.50-0.59 held only
+ * routine reports and repeated hand-back notices (scripts/jev-replay.ts).
+ */
+export const FOLLOW_UP_THRESHOLD = 0.6;
 /** Longest `output_tail` sent as state. Jev's context is 32k tokens; the log tail stays well under it. */
 export const MAX_STATE_CHARS = 48_000;
 const TAIL_LINES = 200;
@@ -26,15 +32,22 @@ const SEVERITY_LEVELS: readonly EvalSeverity[] = [
 /**
  * The three questions, kept together so thresholds and wording are reviewed in one place.
  * Severity levels mirror the Haiku evaluator prompt; the Score answer is read as the argmax level.
+ * The stand-down and routine-report clauses date from 2026-10-15: a log review found the
+ * disagreements with Haiku sat on runs that deferred on a lock, found nothing eligible, held a
+ * gate or printed their routine report. A replay of 303 retained runs (scripts/jev-replay.ts)
+ * moved those to P(follow-up) 0.10-0.22 and cut flagged successful runs from 17% to 4% at the
+ * 0.6 threshold, while every failed, timed-out or partial run stayed at 0.78 or above; the
+ * job_status clause in `true` is what keeps the hand-back failures (exit 30) up there.
  */
 export const DECISION_QUESTIONS = {
   severity: {
     type: "score",
     instructions:
       "How severe is the outcome of this scheduled job run, judged from `job_status`, `exit_code` and `output_tail`? " +
-      "Only this run's own outcome matters: error text quoted from reviewed code, from other runs, or from the job's instructions is not a problem of this run.",
+      "Only this run's own outcome matters: error text quoted from reviewed code, from other runs, or from the job's instructions is not a problem of this run. " +
+      "A run that stood down on purpose (another job held a lock, nothing was eligible or pending, a gate held) or that produced its routine report did what it was meant to do.",
     criteria: [
-      "ok: completed successfully, no issues",
+      "ok: completed successfully, no issues; a deliberate stand-down or a routine report is ok",
       "info: completed with minor notes worth knowing",
       "warning: completed but with issues to address soon (partial failures, degraded data, auth warnings, an unreachable host that was skipped)",
       "critical: failed, produced wrong results, or has errors needing immediate attention (auth expired, data corruption, missing outputs)",
@@ -43,10 +56,10 @@ export const DECISION_QUESTIONS = {
   follow_up_needed: {
     type: "noul",
     instructions:
-      "Should a human look at this run before the next scheduled run?",
+      "Should a human look at this run before the next scheduled run? Only this run's own outcome counts.",
     criteria: {
-      true: "an auth/credential failure, a partial completion, an unexpected error, a missing expected output, a skipped host, or the output asks for human input",
-      false: "the job did what it was meant to do and nothing needs a person",
+      true: "a job_status of failed, timeout or partial; an auth/credential failure, a partial completion, an unexpected error, a missing expected output, a skipped host, or the output asks for human input",
+      false: "the job did what it was meant to do, including standing down on purpose (a lock held by another job, nothing eligible or pending, a gate that held) or producing its routine report, and nothing needs a person",
     },
   },
   failure_kind: {
@@ -54,7 +67,7 @@ export const DECISION_QUESTIONS = {
     instructions:
       "Which best describes the dominant problem in this run, if any?",
     criteria: {
-      none: "no problem",
+      none: "no problem, or the run stood down on purpose",
       auth_expired: "login, token, credential or 401/403 problems",
       network: "unreachable host, DNS, TLS, socket or connection errors",
       timeout: "the run or a step hit a time limit",
@@ -74,9 +87,26 @@ export interface DecisionInput {
   output: string;
 }
 
+/** The shape of DECISION_QUESTIONS with plain strings, so alternative wording is assignable. */
+export interface DecisionQuestions {
+  severity: { type: "score"; instructions: string; criteria: readonly string[] };
+  follow_up_needed: {
+    type: "noul";
+    instructions: string;
+    criteria: { true: string; false: string };
+  };
+  failure_kind: {
+    type: "choice";
+    instructions: string;
+    criteria: Readonly<Record<string, string>>;
+  };
+}
+
 export interface DecisionClientOptions {
   /** null disables the call (reported as an error); undefined reads TYPESAFE_API_KEY. */
   apiKey?: string | null;
+  /** Alternative questions, same shape as DECISION_QUESTIONS; scripts/jev-replay.ts measures wording changes with it. */
+  questions?: DecisionQuestions;
   baseUrl?: string;
   model?: string;
   fetch?: typeof fetch;
@@ -154,7 +184,11 @@ export function dropConnectorNotices(output: string): string {
   return kept.join("\n");
 }
 
-export function buildDecisionRequest(input: DecisionInput, model: string) {
+export function buildDecisionRequest(
+  input: DecisionInput,
+  model: string,
+  questions: DecisionQuestions = DECISION_QUESTIONS,
+) {
   const output = dropConnectorNotices(input.output);
   const lines = output.split("\n");
   let tail =
@@ -168,7 +202,7 @@ export function buildDecisionRequest(input: DecisionInput, model: string) {
       exit_code: input.exitCode,
       output_tail: tail,
     },
-    questions: DECISION_QUESTIONS,
+    questions,
   };
 }
 
@@ -238,7 +272,9 @@ export async function requestRunDecision(
       error: "TYPESAFE_API_KEY is not set",
     };
 
-  const body = JSON.stringify(buildDecisionRequest(input, model));
+  const body = JSON.stringify(
+    buildDecisionRequest(input, model, options.questions ?? DECISION_QUESTIONS),
+  );
   let error = "decision request did not complete";
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0 && retryDelayMs > 0) await sleep(retryDelayMs);
@@ -296,7 +332,7 @@ export async function requestRunDecision(
           },
           followUp: {
             probability: answers.follow_up_needed.noul,
-            needed: answers.follow_up_needed.noul >= 0.5,
+            needed: answers.follow_up_needed.noul >= FOLLOW_UP_THRESHOLD,
           },
           failureKind: {
             choice: answers.failure_kind.choice,

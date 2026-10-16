@@ -47,10 +47,56 @@ export function createApp(
     startedAt,
     activeJobs: engine.getActiveJobIds(),
     host: engine.getCurrentConfig()?.host ?? null,
+    draining: engine.isDraining(),
+    // The account's usage window is exhausted: Claude jobs held until `until` (2026-10-16).
+    usageHold: engine.getUsageHold(),
   });
 
   app.get("/api/health", (_req, res) => {
     res.json(selfHealth());
+  });
+
+  // Lift the usage hold before its reset (more usage bought, or the limit text misread).
+  app.post("/api/usage-hold/clear", (_req, res) => {
+    const cleared = engine.clearUsageHold();
+    res.json({ ok: true, cleared });
+  });
+
+  // The headroom gauge's samples (scripts/usage-headroom.py, the usage-headroom job): the newest
+  // one in full and the last 48 lines of the ledger, plus the hold, for the dashboard card.
+  app.get("/api/usage", (_req, res) => {
+    const usageDir = path.join(projectRoot, "data", "usage");
+    let latest: unknown = null;
+    try {
+      latest = JSON.parse(fs.readFileSync(path.join(usageDir, "latest.json"), "utf8"));
+    } catch {
+      latest = null;
+    }
+    let samples: unknown[] = [];
+    try {
+      const lines = fs.readFileSync(path.join(usageDir, "headroom.jsonl"), "utf8").trim().split("\n");
+      samples = lines
+        .slice(-48)
+        .map((line) => {
+          try {
+            return JSON.parse(line) as unknown;
+          } catch {
+            return null;
+          }
+        })
+        .filter((s) => s !== null);
+    } catch {
+      samples = [];
+    }
+    res.json({ latest, samples, hold: engine.getUsageHold() });
+  });
+
+  // Stop starting runs and exit once the running ones finish (launchd restarts the daemon:
+  // see index.ts). deploy-air.sh calls this instead of waiting for an idle moment.
+  app.post("/api/drain", (_req, res) => {
+    const running = engine.drain();
+    console.log(`[daemon] Drain requested via API; running: ${running.join(", ") || "(none)"}`);
+    res.json({ ok: true, draining: true, running, pid: process.pid });
   });
 
   // The whole scheduler.yaml, every host's jobs, cached by mtime: the engine's config holds only

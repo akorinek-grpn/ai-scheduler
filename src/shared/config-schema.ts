@@ -22,6 +22,18 @@ const jobSchema = z
     // Which host role(s) schedule this job (see `hosts`): a role name, a list of them, or
     // "all". Required once `hosts` is declared, so a job never runs on two Macs by accident.
     runs_on: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
+    // Shell command run before the job starts (job directory, job env). Exit 0: run. Exit 75:
+    // the run is `deferred` and retried after retry_after (twice at most). Other: `failed`.
+    precondition: z.string().min(1).optional(),
+    precondition_timeout: z.number().positive().optional(),
+    retry_after: z.number().positive().optional(),
+    // Exit codes with their own run status: `blocked` = the job waits on a person (no retry).
+    outcome_codes: z
+      .object({ blocked: z.array(z.number().int().min(1).max(255)).optional() })
+      .optional(),
+    // A script job that starts its own Claude session: held with the claude-type jobs while the
+    // account's usage window is exhausted (the usage hold, 2026-10-16). Other scripts keep running.
+    uses_claude: z.boolean().optional(),
   })
   .refine(
     (job) => {

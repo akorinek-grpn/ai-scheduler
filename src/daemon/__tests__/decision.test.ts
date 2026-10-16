@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildDecisionRequest,
+  DECISION_QUESTIONS,
   decisionEnv,
+  FOLLOW_UP_THRESHOLD,
   MAX_STATE_CHARS,
   requestRunDecision,
   severityFromProbabilities,
@@ -78,6 +80,33 @@ describe("decision request", () => {
     expect(body.questions.severity.criteria).toHaveLength(4);
     expect(body.questions.follow_up_needed.type).toBe("noul");
     expect(body.questions.failure_kind.type).toBe("choice");
+  });
+
+  it("sends a caller's alternative questions instead of the shipped ones (scripts/jev-replay.ts tunes wording that way)", async () => {
+    const variant = {
+      ...DECISION_QUESTIONS,
+      follow_up_needed: { ...DECISION_QUESTIONS.follow_up_needed, instructions: "variant wording" },
+    };
+    expect(buildDecisionRequest(input, "m", variant).questions.follow_up_needed.instructions).toBe("variant wording");
+    expect(buildDecisionRequest(input, "m").questions).toBe(DECISION_QUESTIONS);
+    const fetchMock = vi.fn(async () => reply(served));
+    await requestRunDecision(input, { ...options(fetchMock as unknown as typeof fetch), questions: variant });
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+    expect(body.questions.follow_up_needed.instructions).toBe("variant wording");
+    expect(body.questions.severity).toEqual(DECISION_QUESTIONS.severity);
+  });
+
+  it("flags a follow-up from P(follow-up) 0.60, not 0.50 (2026-10-15 replay: every failed/timed-out run scored >= 0.63, and 0.50-0.59 held only routine reports)", async () => {
+    const at = async (noul: number) => {
+      const fetchMock = vi.fn(async () =>
+        reply({ ...served, answers: { ...answers, follow_up_needed: { type: "noul", noul } } }),
+      );
+      const result = await requestRunDecision(input, options(fetchMock as unknown as typeof fetch));
+      return result.decision?.followUp;
+    };
+    expect(await at(0.59)).toEqual({ probability: 0.59, needed: false });
+    expect(await at(0.6)).toEqual({ probability: 0.6, needed: true });
+    expect(FOLLOW_UP_THRESHOLD).toBe(0.6);
   });
 
   it("parses answers into a severity label, follow-up flag and usage with the reported cost", async () => {

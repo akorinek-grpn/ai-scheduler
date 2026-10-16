@@ -25,12 +25,17 @@ interface RunBatch {
 
 // --- Status visuals ---
 
+// deferred: the precondition said "not now" (grey, nothing ran); blocked: waiting on a person
+// (amber, apart from failures); killed: ended without an exit code (red, like a failure).
 const statusDot: Record<string, string> = {
   running: "bg-yellow-500 animate-pulse",
   success: "bg-green-500",
   partial: "bg-amber-500",
   failed: "bg-red-500",
   timeout: "bg-orange-500",
+  deferred: "bg-slate-400",
+  blocked: "bg-amber-500",
+  killed: "bg-red-500",
 };
 
 const statusText: Record<string, string> = {
@@ -39,6 +44,9 @@ const statusText: Record<string, string> = {
   partial: "text-amber-500",
   failed: "text-red-500",
   timeout: "text-orange-500",
+  deferred: "text-slate-400",
+  blocked: "text-amber-500",
+  killed: "text-red-500",
 };
 
 const evalColor: Record<string, string> = {
@@ -116,7 +124,7 @@ function makeBatch(runs: RunResponse[], anchorTime: number): RunBatch {
   let hasIssues = false;
   for (const r of runs) {
     statusCounts[r.status] = (statusCounts[r.status] ?? 0) + 1;
-    if (r.status === "failed" || r.status === "timeout" || r.status === "partial") hasIssues = true;
+    if (r.status === "failed" || r.status === "timeout" || r.status === "partial" || r.status === "killed") hasIssues = true;
     if (r.evaluation?.severity === "critical" || r.evaluation?.severity === "warning") hasIssues = true;
   }
 
@@ -127,8 +135,8 @@ function makeBatch(runs: RunResponse[], anchorTime: number): RunBatch {
 
 function RunRow({ run }: { run: RunResponse }): React.ReactElement {
   const ev = run.evaluation;
-  const isBad = run.status === "failed" || run.status === "timeout";
-  const isPartial = run.status === "partial";
+  const isBad = run.status === "failed" || run.status === "timeout" || run.status === "killed";
+  const isPartial = run.status === "partial" || run.status === "blocked";
   const evIsBad = ev && (ev.severity === "critical" || ev.severity === "warning");
 
   return (
@@ -160,6 +168,8 @@ function RunRow({ run }: { run: RunResponse }): React.ReactElement {
           </span>
         ) : run.status === "running" ? (
           <span className="text-muted-foreground">running...</span>
+        ) : run.status === "deferred" || run.status === "blocked" || run.status === "killed" ? (
+          <span className={statusText[run.status]}>{run.status}</span>
         ) : (
           <span className="text-muted-foreground">{"\u2014"}</span>
         )}
@@ -228,7 +238,7 @@ export function RunsTable({ runs, limit, grouped = false }: RunsTableProps): Rea
               {batch.label}
             </span>
             <span className="flex items-center gap-1.5">
-              {(["failed", "timeout", "partial", "running", "success"] as const)
+              {(["failed", "killed", "timeout", "partial", "blocked", "running", "deferred", "success"] as const)
                 .filter((s) => batch.statusCounts[s])
                 .map((s) => (
                   <span key={s} className="flex items-center gap-0.5">
