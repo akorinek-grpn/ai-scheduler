@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "fs";
 import http from "http";
 import os from "os";
@@ -60,6 +60,11 @@ describe("one UI over several hosts' data", () => {
   let savedHost: string | undefined;
 
   const today = new Date().toISOString().slice(0, 10);
+  // The fixture runs start between 00:00 and 07:00 UTC today, so the clock is frozen at midday:
+  // the nightly-tests job starts at 00:32 UTC, when they were still in the future and the
+  // seven-day cost stats counted none (failed every night 2026-10-16..19, passed by hand).
+  // Only Date is faked; the HTTP server's timers stay real.
+  const FROZEN_NOW = new Date(`${today}T12:00:00.000Z`);
 
   /** A completed AI run with 2 tool calls; `host` is the stamp in meta.json. */
   function writeRun(root: string, jobId: string, runId: string, host: string | undefined, preserve = false): void {
@@ -83,6 +88,7 @@ describe("one UI over several hosts' data", () => {
   }
 
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"], now: FROZEN_NOW });
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-sched-hostdata-"));
     mirror = path.join(tmpDir, "data", "hosts", "AIR-1");
     fs.writeFileSync(path.join(tmpDir, "scheduler.yaml"), CONFIG);
@@ -108,6 +114,7 @@ describe("one UI over several hosts' data", () => {
 
   afterEach(() => {
     engine.stopAll();
+    vi.useRealTimers();
     fs.rmSync(tmpDir, { recursive: true, force: true });
     if (savedHost === undefined) delete process.env.AI_SCHEDULER_HOST;
     else process.env.AI_SCHEDULER_HOST = savedHost;
