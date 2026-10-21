@@ -926,6 +926,21 @@ jobs:
     tags:
       - maintenance
       - desk
+  autopilot-store-pull:
+    name: Pull the autopilot store
+    schedule: "*/5 * * * *"
+    directory: /Users/akorinek/Programming/docs/desk-host
+    runs_on: groupon-mac-16
+    type: script
+    command: bash /Users/akorinek/Programming/docs/desk-host/laptop-pull-autopilot-store.sh
+    timeout: 240
+    max_retries: 0
+    # A slot the daemon misses while its host sync blocks it still pulls, late (one catch-up).
+    catchup: always
+    enabled: true
+    tags:
+      - maintenance
+      - desk
   pr-discovery:
     name: Review rounds — PR discovery (candidates file for the hourly review jobs)
     schedule: 20,50 * * * *
