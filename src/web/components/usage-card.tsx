@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getUsage, type UsageResponse, type UsageWindow } from "@/lib/api-client";
+import { getUsage, type UsagePace, type UsageResponse, type UsageWindow } from "@/lib/api-client";
 import { useHostView } from "@/components/host-view";
 import { formatRemaining } from "@/components/usage-hold-banner";
 
@@ -29,6 +29,27 @@ function barColor(percent: number): string {
   if (percent >= 90) return "bg-red-500";
   if (percent >= 70) return "bg-amber-500";
   return "bg-green-500";
+}
+
+const PACE_LABEL: Record<UsagePace["state"], string> = {
+  hot: "running hot",
+  "on-pace": "on pace",
+  spare: "budget to spare",
+  unknown: "unknown",
+};
+
+function PaceLine({ pace }: { pace: UsagePace }): React.ReactElement {
+  const tone = pace.state === "hot" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground";
+  const detail =
+    pace.state === "unknown" || pace.utilization === null || pace.expected === null || pace.hours_left === null
+      ? pace.note
+      : `${Math.round(pace.utilization)}% used, ${Math.round(pace.expected)}% expected, ${Math.round(pace.hours_left)} h to the reset`;
+  return (
+    <p className={`text-[12px] ${tone}`} role="status" data-pace={pace.state}>
+      Pace: {PACE_LABEL[pace.state]} · review rounds take ×{pace.factor} of their usual PRs · {detail}
+      {pace.five_hour_brake ? " · 5-hour brake on" : ""}
+    </p>
+  );
 }
 
 function WindowRow({ id, window, now }: { id: string; window: UsageWindow; now: number }): React.ReactElement {
@@ -64,9 +85,9 @@ function WindowRow({ id, window, now }: { id: string; window: UsageWindow; now: 
 }
 
 /**
- * The account's usage window as the usage-headroom job last sampled it (GET /api/usage).
- * Report-only: the card shows headroom, it throttles nothing. Hidden while another host is on
- * screen, whose samples are not read from here.
+ * The account's usage window as the usage-headroom job last sampled it (GET /api/usage), and
+ * the pace the gauge derives from it, which the review rounds scale their budget by. Hidden
+ * while another host is on screen, whose samples are not read from here.
  */
 export function UsageCard(): React.ReactElement | null {
   const { isOther } = useHostView();
@@ -110,7 +131,7 @@ export function UsageCard(): React.ReactElement | null {
           Claude usage window
         </h3>
         <span className="text-[11px] text-muted-foreground">
-          {latest ? `sampled ${formatAge(latest.at, now)}` : "no sample yet"} · every 30 min · report-only
+          {latest ? `sampled ${formatAge(latest.at, now)}` : "no sample yet"} · every 30 min · paces the review rounds
         </span>
       </div>
 
@@ -136,6 +157,8 @@ export function UsageCard(): React.ReactElement | null {
           ))}
         </div>
       )}
+
+      {latest?.pace && <PaceLine pace={latest.pace} />}
 
       {data?.hold && (
         <p className="text-[12px] text-amber-600 dark:text-amber-400" role="status">

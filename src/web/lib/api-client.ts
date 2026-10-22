@@ -55,6 +55,20 @@ export interface UsageWindow {
   resets_at: string | null;
 }
 
+/**
+ * The review-budget pace the gauge derives from the 7-day window (scripts/usage-headroom.py,
+ * 2026-10-22): `factor` multiplies the review rounds' rate_limit; 1.0 when on pace or unknown.
+ */
+export interface UsagePace {
+  state: "hot" | "on-pace" | "spare" | "unknown";
+  factor: number;
+  utilization: number | null;
+  expected: number | null;
+  hours_left: number | null;
+  five_hour_brake: boolean;
+  note: string;
+}
+
 export interface UsageSample {
   version?: number;
   at: string;
@@ -63,6 +77,7 @@ export interface UsageSample {
   http?: number | null;
   parsed?: boolean;
   windows: Record<string, UsageWindow>;
+  pace?: UsagePace | null;
   error?: string | null;
 }
 

@@ -966,16 +966,18 @@ jobs:
       - hourly
       - pr-review
   usage-headroom:
-    name: Claude usage window — headroom sample (report-only)
+    name: Claude usage window — headroom sample and review pace
     schedule: "*/30 * * * *"
     directory: /Users/akorinek/Programming/ai-scheduler
     runs_on: all
     type: script
     # Samples the account's usage windows (the figures Claude Code's /usage shows) into
-    # data/usage/latest.json and headroom.jsonl for the dashboard card (GET /api/usage).
-    # Report-only: nothing is throttled by it yet; thresholds come from a week of samples
-    # (2026-10-16). The token is read from the login keychain, so the job needs the GUI session
-    # the LaunchAgent runs in. Any failure is a sample with status "unavailable", exit 0.
+    # data/usage/latest.json and headroom.jsonl for the dashboard card (GET /api/usage)
+    # (2026-10-16). Since 2026-10-22 the sample carries a `pace` (the 7-day allowance left per
+    # remaining hour over the nominal rate, 0.25-2.0) that the pr-review rounds multiply their
+    # per-run budget by: a week being spent too fast reviews fewer PRs an hour, a quiet one more.
+    # The token is read from the login keychain, so the job needs the GUI session the LaunchAgent
+    # runs in. Any failure is a sample with status "unavailable" and pace unknown (1.0), exit 0.
     command: python3 scripts/usage-headroom.py
     timeout: 60
     max_retries: 0
