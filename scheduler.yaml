@@ -408,9 +408,10 @@ jobs:
         lines and summary as your run output and STOP. Do NOT read SKILL.md, do NOT
         call any other tool. This is the expected outcome of most runs.
       - candidates NON-EMPTY -> proceed to STEP 2 for exactly those PRs, one at a
-        time, in the exact order of the `.candidates` array (already sorted oldest
-        createdAt first). Never reorder by size or effort: when the run hits its
-        timeout, the oldest PRs must be the ones already reviewed. Pass each
+        time, in the exact order of the `.candidates` array (already in dispatch
+        order: PRs I reviewed before come first, new PRs last, oldest first within
+        each class). Never reorder by size or effort: when the run hits its
+        timeout, the re-reviews must be the ones already done. Pass each
         candidate's author_in_team to the gate exactly as the file gives it, and post
         exactly the posted_event the gate returns, whatever your verdict.
       - exit code 2 -> a host was unreachable/unauthenticated. Say WHICH host
@@ -792,8 +793,9 @@ jobs:
         lines and summary as your run output and STOP. Do NOT read SKILL.md, do NOT
         call any other tool. This is the expected outcome of most runs.
       - candidates NON-EMPTY -> proceed to STEP 2 for exactly those PRs, one at a
-        time, in the exact order of the `.candidates` array (already sorted oldest
-        createdAt first). Never reorder by size or effort. Pass each
+        time, in the exact order of the `.candidates` array (already in dispatch
+        order: moved convergences first, verdict-only ones after, oldest first
+        within each). Never reorder by size or effort. Pass each
         candidate's author_in_team to the gate exactly as the file gives it.
       - exit code 2 -> a host was unreachable/unauthenticated. Say WHICH host
         prominently in your summary (this must never look like "no PRs found"),
@@ -853,7 +855,11 @@ jobs:
       - If there are no candidates, report "No converged PRs to approve".
       - ALWAYS print the per-PR decision lines and the batch summary table from
         the skill's batch-mode section, even when everything is skipped.
-    model: opus
+    # sonnet again since 2026-10-22. Opus came back on 2026-10-16 because the Air reviews on its
+    # own account; that account hit its weekly limit on 2026-10-22 with this job at 67% of the
+    # spend ($20.60 per run on opus, 110 runs in 60 h). The verdict is approve-gate.sh's, and
+    # the architect subagent (SKILL.md Role 6) still runs on opus.
+    model: sonnet
     skip_permissions: true
     # 60 s under the hourly interval, so a timeout's teardown never makes the next tick skip
     # (11:40Z on 2026-10-16 after the 10:40 timeout; see babysit-prs).
